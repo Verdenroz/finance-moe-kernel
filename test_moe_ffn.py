@@ -29,8 +29,8 @@ def test_finance_moe_ffn():
     print(f"   Intermediate size: {intermediate_size}")
     print(f"   Number of experts: {num_experts}")
     
-    # Device setup
-    device = CPU() if accelerator_count() == 0 else Accelerator()
+    # Device setup - force CPU
+    device = CPU()
     print(f"🚀 Using {device}")
     
     # Custom kernels path
@@ -63,15 +63,15 @@ def test_finance_moe_ffn():
                     market_regime
                 ],
                 out_types=[
-                    # output: [batch, seq_len, hidden] - float16
+                    # output: [batch, seq_len, hidden] - float32
                     TensorType(
-                        dtype=DType.float16,
+                        dtype=DType.float32,
                         shape=[batch_size, seq_len, hidden_size],
                         device=DeviceRef.from_device(device),
                     ),
-                    # expert_utilization: [num_experts] - float16
+                    # expert_utilization: [num_experts] - float32
                     TensorType(
-                        dtype=DType.float16,
+                        dtype=DType.float32,
                         shape=[num_experts],
                         device=DeviceRef.from_device(device),
                     ),
@@ -83,13 +83,13 @@ def test_finance_moe_ffn():
             "finance_moe_ffn_test",
             forward=moe_ffn_graph,
             input_types=[
-                TensorType(DType.float16, [batch_size, seq_len, hidden_size], DeviceRef.from_device(device)),  # hidden_states
-                TensorType(DType.float16, [num_experts, hidden_size], DeviceRef.from_device(device)),          # gate_weights  
-                TensorType(DType.float16, [num_experts], DeviceRef.from_device(device)),                       # gate_bias
-                TensorType(DType.float16, [num_experts, hidden_size, intermediate_size], DeviceRef.from_device(device)),  # up_weights
-                TensorType(DType.float16, [num_experts, intermediate_size, hidden_size], DeviceRef.from_device(device)),  # down_weights
+                TensorType(DType.float32, [batch_size, seq_len, hidden_size], DeviceRef.from_device(device)),  # hidden_states
+                TensorType(DType.float32, [num_experts, hidden_size], DeviceRef.from_device(device)),          # gate_weights  
+                TensorType(DType.float32, [num_experts], DeviceRef.from_device(device)),                       # gate_bias
+                TensorType(DType.float32, [num_experts, hidden_size, intermediate_size], DeviceRef.from_device(device)),  # up_weights
+                TensorType(DType.float32, [num_experts, intermediate_size, hidden_size], DeviceRef.from_device(device)),  # down_weights
                 TensorType(DType.int32, [batch_size, seq_len], DeviceRef.from_device(device)),                 # domain_assignments
-                TensorType(DType.float16, [1], DeviceRef.from_device(device)),                                 # market_regime
+                TensorType(DType.float32, [1], DeviceRef.from_device(device)),                                 # market_regime
             ],
             custom_extensions=[mojo_kernels],
         )
@@ -105,13 +105,13 @@ def test_finance_moe_ffn():
         # Generate test inputs
         print("🎲 Generating test inputs...")
         np.random.seed(42)
-        hidden_states = np.random.randn(batch_size, seq_len, hidden_size).astype(np.float16)
-        gate_weights = np.random.randn(num_experts, hidden_size).astype(np.float16)  # Fixed shape
-        gate_bias = np.random.randn(num_experts).astype(np.float16)
-        up_weights = np.random.randn(num_experts, hidden_size, intermediate_size).astype(np.float16)
-        down_weights = np.random.randn(num_experts, intermediate_size, hidden_size).astype(np.float16)
+        hidden_states = np.random.randn(batch_size, seq_len, hidden_size).astype(np.float32)
+        gate_weights = np.random.randn(num_experts, hidden_size).astype(np.float32)  # Fixed shape
+        gate_bias = np.random.randn(num_experts).astype(np.float32)
+        up_weights = np.random.randn(num_experts, hidden_size, intermediate_size).astype(np.float32)
+        down_weights = np.random.randn(num_experts, intermediate_size, hidden_size).astype(np.float32)
         domain_assignments = np.random.randint(0, num_experts, (batch_size, seq_len)).astype(np.int32)
-        market_regime = np.random.rand(1).astype(np.float16)  # Fixed shape
+        market_regime = np.random.rand(1).astype(np.float32)  # Fixed shape
         
         print("📤 Converting inputs to tensors and moving to device...")
         # Convert to tensors and move to device

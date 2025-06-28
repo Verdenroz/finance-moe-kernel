@@ -29,7 +29,7 @@ def test_finance_macro_router():
     print(f"   Number of domains: {num_domains}")
     
     # Device setup
-    device = CPU() if accelerator_count() == 0 else Accelerator()
+    device = CPU()
     print(f"🚀 Using {device}")
     
     # Custom kernels path
@@ -63,7 +63,7 @@ def test_finance_macro_router():
                     ),
                     # routing_probs: [batch, seq_len, num_domains] - float16
                     TensorType(
-                        dtype=DType.float16,
+                        dtype=DType.float32,
                         shape=[batch_size, seq_len, num_domains],
                         device=DeviceRef.from_device(device),
                     ),
@@ -74,11 +74,11 @@ def test_finance_macro_router():
             "finance_macro_router_test",
             forward=macro_router_graph,
             input_types=[
-                TensorType(DType.float16, [batch_size, seq_len, hidden_size], DeviceRef.from_device(device)),
-                TensorType(DType.float16, [hidden_size, num_domains], DeviceRef.from_device(device)),
-                TensorType(DType.float16, [num_domains], DeviceRef.from_device(device)),
-                TensorType(DType.float16, [batch_size, seq_len], DeviceRef.from_device(device)),
-                TensorType(DType.float16, [batch_size, seq_len, num_risk_metrics], DeviceRef.from_device(device)),
+                TensorType(DType.float32, [batch_size, seq_len, hidden_size], DeviceRef.from_device(device)),
+                TensorType(DType.float32, [hidden_size, num_domains], DeviceRef.from_device(device)),
+                TensorType(DType.float32, [num_domains], DeviceRef.from_device(device)),
+                TensorType(DType.float32, [batch_size, seq_len], DeviceRef.from_device(device)),
+                TensorType(DType.float32, [batch_size, seq_len, num_risk_metrics], DeviceRef.from_device(device)),
             ],
             custom_extensions=[mojo_kernels],
         )
@@ -89,11 +89,11 @@ def test_finance_macro_router():
         
         # Generate test inputs
         np.random.seed(42)
-        sequence_embeddings = np.random.randn(batch_size, seq_len, hidden_size).astype(np.float16)
-        domain_router_weights = np.random.randn(hidden_size, num_domains).astype(np.float16)
-        domain_router_bias = np.random.randn(num_domains).astype(np.float16)
-        market_volatility = np.random.rand(batch_size, seq_len).astype(np.float16)
-        risk_factors = np.random.rand(batch_size, seq_len, num_risk_metrics).astype(np.float16)
+        sequence_embeddings = np.random.randn(batch_size, seq_len, hidden_size).astype(np.float32)
+        domain_router_weights = np.random.randn(hidden_size, num_domains).astype(np.float32)
+        domain_router_bias = np.random.randn(num_domains).astype(np.float32)
+        market_volatility = np.random.rand(batch_size, seq_len).astype(np.float32)
+        risk_factors = np.random.rand(batch_size, seq_len, num_risk_metrics).astype(np.float32)
         
         # Convert to tensors and move to device
         inputs = [

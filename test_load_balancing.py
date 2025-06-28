@@ -25,8 +25,8 @@ def test_financial_load_balancing():
     print(f"   Sequence length: {seq_len}")
     print(f"   Number of experts: {num_experts}")
     
-    # Device setup
-    device = CPU() if accelerator_count() == 0 else Accelerator()
+    # Device setup - force CPU
+    device = CPU()
     print(f"🚀 Using {device}")
     
     # Custom kernels path
@@ -50,15 +50,15 @@ def test_financial_load_balancing():
                     risk_penalty_weight
                 ],
                 out_types=[
-                    # aux_loss: [1] - float16
+                    # aux_loss: [1] - float32
                     TensorType(
-                        dtype=DType.float16,
+                        dtype=DType.float32,
                         shape=[1],
                         device=DeviceRef.from_device(device),
                     ),
-                    # risk_metrics: [num_experts] - float16
+                    # risk_metrics: [num_experts] - float32
                     TensorType(
-                        dtype=DType.float16,
+                        dtype=DType.float32,
                         shape=[num_experts],
                         device=DeviceRef.from_device(device),
                     ),
@@ -69,10 +69,10 @@ def test_financial_load_balancing():
             "financial_load_balancing_test",
             forward=load_balancing_graph,
             input_types=[
-                TensorType(DType.float16, [batch_size, seq_len, num_experts], DeviceRef.from_device(device)),
-                TensorType(DType.float16, [batch_size, seq_len, num_experts], DeviceRef.from_device(device)),
-                TensorType(DType.float16, [num_experts], DeviceRef.from_device(device)),
-                TensorType(DType.float16, [1], DeviceRef.from_device(device)),
+                TensorType(DType.float32, [batch_size, seq_len, num_experts], DeviceRef.from_device(device)),
+                TensorType(DType.float32, [batch_size, seq_len, num_experts], DeviceRef.from_device(device)),
+                TensorType(DType.float32, [num_experts], DeviceRef.from_device(device)),
+                TensorType(DType.float32, [1], DeviceRef.from_device(device)),
             ],
             custom_extensions=[mojo_kernels],
         )
@@ -83,10 +83,10 @@ def test_financial_load_balancing():
         
         # Generate test inputs
         np.random.seed(42)
-        gate_probs = np.random.rand(batch_size, seq_len, num_experts).astype(np.float16)
-        expert_assignments = np.random.rand(batch_size, seq_len, num_experts).astype(np.float16)
-        expert_utilization = np.random.rand(num_experts).astype(np.float16)
-        risk_penalty_weight = np.array([0.1]).astype(np.float16)
+        gate_probs = np.random.rand(batch_size, seq_len, num_experts).astype(np.float32)
+        expert_assignments = np.random.rand(batch_size, seq_len, num_experts).astype(np.float32)
+        expert_utilization = np.random.rand(num_experts).astype(np.float32)
+        risk_penalty_weight = np.array([0.1]).astype(np.float32)
         
         # Normalize gate probabilities
         gate_probs = gate_probs / np.sum(gate_probs, axis=2, keepdims=True)

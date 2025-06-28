@@ -27,8 +27,8 @@ def test_market_regime_detector():
     print(f"   Number of features: {num_features}")
     print(f"   Lookback window: {lookback_window}")
     
-    # Device setup
-    device = CPU() if accelerator_count() == 0 else Accelerator()
+    # Device setup - force CPU
+    device = CPU()
     print(f"🚀 Using {device}")
     
     # Custom kernels path
@@ -47,38 +47,40 @@ def test_market_regime_detector():
                 out_types=[
                     # regime_indicators: [batch, 3] - bull/bear/sideways probabilities
                     TensorType(
-                        dtype=DType.float16,
+                        dtype=DType.float32,
                         shape=[batch_size, 3],
                         device=DeviceRef.from_device(device),
                     ),
                     # volatility_indicators: [batch, 1] - volatility level
                     TensorType(
-                        dtype=DType.float16,
+                        dtype=DType.float32,
                         shape=[batch_size, 1],
                         device=DeviceRef.from_device(device),
                     ),
                 ],
             )
         
+        print("🔧 Creating market regime detector graph")
         graph = Graph(
             "market_regime_detector_test",
             forward=market_regime_graph,
             input_types=[
-                TensorType(DType.float16, [batch_size, seq_len, num_features], DeviceRef.from_device(device)),
+                TensorType(DType.float32, [batch_size, seq_len, num_features], DeviceRef.from_device(device)),
                 TensorType(DType.int32, [1], DeviceRef.from_device(device)),
             ],
             custom_extensions=[mojo_kernels],
         )
+        print("🔧 Graph created successfully")
         
         # Create session and load model
         session = InferenceSession(devices=[device])
         model = session.load(graph)
-        
+        print("🔗 Model loaded successfully")
         # Generate test inputs - simulate price data
         np.random.seed(42)
         
         # Create realistic price sequences
-        price_sequences = np.zeros((batch_size, seq_len, num_features), dtype=np.float16)
+        price_sequences = np.zeros((batch_size, seq_len, num_features), dtype=np.float32)
         
         for b in range(batch_size):
             # Start with base price
