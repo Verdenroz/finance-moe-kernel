@@ -1,6 +1,6 @@
 import compiler
 from algorithm import vectorize, parallelize
-from math import sqrt, exp, log, tanh, abs, max, min
+from math import sqrt, exp, log, tanh
 from memory import memset_zero, memcpy
 from runtime.asyncrt import DeviceContextPtr
 from tensor_internal import (
@@ -15,30 +15,30 @@ from utils.index import IndexList
 # ================== HELPER FUNCTIONS ==================
 @always_inline
 fn softmax_inplace[dtype: DType](data: OutputTensor, batch_idx: Int, seq_idx: Int, num_classes: Int):
-    """Apply softmax to a row of probabilities"""
+    """Apply softmax to a row of probabilities."""
     var max_val = SIMD[dtype, 1](-1e9)
     
     # Find max for numerical stability
     for i in range(num_classes):
         var idx = IndexList[3](batch_idx, seq_idx, i)
         var val = data.load[1](idx)[0]
-        if val > max_val:
-            max_val = val
+        if (SIMD[dtype, 1](val) > SIMD[dtype, 1](max_val))[0]:
+            max_val = SIMD[dtype, 1](val)
     
     # Compute exp and sum
     var sum_exp = SIMD[dtype, 1](0.0)
     for i in range(num_classes):
         var idx = IndexList[3](batch_idx, seq_idx, i)
         var val = data.load[1](idx)[0]
-        var exp_val = exp(val - max_val)
-        data.store[1](idx, SIMD[dtype, 1](exp_val))
+        var exp_val = exp(SIMD[dtype, 1](val) - SIMD[dtype, 1](max_val))
+        data.store[1](idx, SIMD[data.dtype, 1](exp_val))
         sum_exp += exp_val
     
     # Normalize
     for i in range(num_classes):
         var idx = IndexList[3](batch_idx, seq_idx, i)
         var val = data.load[1](idx)[0]
-        data.store[1](idx, SIMD[dtype, 1](val / sum_exp))
+        data.store[1](idx, SIMD[data.dtype, 1](SIMD[dtype, 1](val) / sum_exp))
 
 @always_inline
 fn compute_volatility[dtype: DType](
@@ -47,12 +47,12 @@ fn compute_volatility[dtype: DType](
     seq_idx: Int, 
     lookback: Int
 ) -> SIMD[dtype, 1]:
-    """Compute rolling volatility from price sequence"""
+    """Compute rolling volatility from price sequence."""
     var sum_returns = SIMD[dtype, 1](0.0)
     var sum_squared_returns = SIMD[dtype, 1](0.0)
     var count = SIMD[dtype, 1](0.0)
     
-    for i in range(max(0, seq_idx - lookback), seq_idx):
+    for i in range(0 if seq_idx - lookback < 0 else seq_idx - lookback, seq_idx):
         if i > 0:
             var curr_idx = IndexList[3](batch_idx, i, 0)
             var prev_idx = IndexList[3](batch_idx, i - 1, 0)
@@ -68,7 +68,7 @@ fn compute_volatility[dtype: DType](
     if count > 1:
         var mean_return = sum_returns / count
         var variance = (sum_squared_returns / count) - (mean_return * mean_return)
-        return sqrt(max(variance, SIMD[dtype, 1](1e-8)))
+        return sqrt(variance if variance[0] > 1e-8 else SIMD[dtype, 1](1e-8))
     else:
         return SIMD[dtype, 1](0.1)  # Default volatility
 
@@ -115,20 +115,20 @@ struct FinanceMacroRouterOp:
                     # Add market volatility factor
                     var vol_idx = IndexList[2](batch_idx, seq_idx)
                     var volatility = market_volatility.load[1](vol_idx)[0]
-                    logit += volatility * (0.5 if d == 0 else -0.3)  # High vol -> domain 0
+                    logit += volatility * SIMD[dtype, 1](0.5 if d == 0 else -0.3)  # High vol -> domain 0
                     
                     # Add risk factor contributions
-                    for rf in range(min(num_risk_factors, 3)):  # Use first 3 risk factors
+                    for rf in range(num_risk_factors if num_risk_factors < 3 else 3):  # Use first 3 risk factors
                         var risk_idx = IndexList[3](batch_idx, seq_idx, rf)
                         var risk_val = risk_factors.load[1](risk_idx)[0]
-                        logit += risk_val * (0.2 if d == rf else -0.1)
+                        logit += risk_val * SIMD[dtype, 1](0.2 if d == rf else -0.1)
                     
                     logits.append(logit)
                 
                 # Store logits first
                 for d in range(num_domains):
                     var prob_idx = IndexList[3](batch_idx, seq_idx, d)
-                    routing_probs.store[1](prob_idx, logits[d])
+                    routing_probs.store[1](prob_idx, SIMD[routing_probs.dtype, 1](logits[d]))
                 
                 # Apply softmax to get probabilities
                 softmax_inplace[dtype](routing_probs, batch_idx, seq_idx, num_domains)
@@ -183,7 +183,7 @@ struct FinanceMoEFFNOp:
             for seq_idx in range(seq_len):
                 # Get domain assignment for this sequence position
                 var domain_idx = IndexList[2](batch_idx, seq_idx)
-                var assigned_domain = int(domain_assignments.load[1](domain_idx)[0])
+                var assigned_domain = Int(domain_assignments.load[1](domain_idx)[0])
                 
                 # Compute gating probabilities
                 var gate_logits = List[SIMD[output.dtype, 1]]()
@@ -261,8 +261,8 @@ struct FinanceMoEFFNOp:
         
         for i in range(num_experts):
             var util_idx = IndexList[1](i)
-            var normalized_util = expert_counts[i] / max(total_usage, SIMD[output.dtype, 1](1e-8))
-            expert_utilization.store[1](util_idx, normalized_util)
+            var normalized_util = expert_counts[i] / (total_usage if total_usage[0] > 1e-8 else SIMD[output.dtype, 1](1e-8))
+            expert_utilization.store[1](util_idx, SIMD[expert_utilization.dtype, 1](normalized_util))
 
 
 # ================== FINANCIAL LOAD BALANCING ==================
@@ -338,7 +338,8 @@ struct FinancialLoadBalancingOp:
             
             # Risk metric: combination of over-utilization and under-utilization penalties
             var ideal_utilization = SIMD[aux_loss.dtype, 1](1.0 / num_experts)
-            var utilization_deviation = abs(utilization - ideal_utilization)
+            var util_diff = utilization - ideal_utilization
+            var utilization_deviation = util_diff if util_diff[0] >= 0 else -util_diff
             
             # Higher risk for both over-utilized and under-utilized experts
             var risk_metric = utilization_deviation * 2.0
@@ -349,7 +350,7 @@ struct FinancialLoadBalancingOp:
             elif utilization < ideal_utilization * 0.5:
                 risk_metric += 0.2  # Penalty for under-utilization
             
-            risk_metrics.store[1](risk_idx, risk_metric)
+            risk_metrics.store[1](risk_idx, SIMD[risk_metrics.dtype, 1](risk_metric))
 
 
 # ================== MARKET REGIME DETECTION ==================
@@ -367,7 +368,7 @@ struct MarketRegimeDetectorOp:
     ) raises:
         var batch_size = regime_indicators.shape()[0]
         var num_regimes = regime_indicators.shape()[1]  # Bull, Bear, Sideways
-        var lookback = int(lookback_window.load[1](IndexList[1](0))[0])
+        var lookback = Int(lookback_window.load[1](IndexList[1](0))[0])
         
         for batch_idx in range(batch_size):
             # Compute price-based indicators
@@ -375,7 +376,7 @@ struct MarketRegimeDetectorOp:
             var seq_len = price_sequences.shape()[1]
             
             # Calculate returns
-            for i in range(1, min(seq_len, lookback + 1)):
+            for i in range(1, seq_len if seq_len < lookback + 1 else lookback + 1):
                 var curr_idx = IndexList[3](batch_idx, seq_len - i, 0)
                 var prev_idx = IndexList[3](batch_idx, seq_len - i - 1, 0)
                 var curr_price = price_sequences.load[1](curr_idx)[0]
@@ -410,7 +411,7 @@ struct MarketRegimeDetectorOp:
             
             mean_return = mean_return / len(returns)
             var variance = (sum_squared_returns / len(returns)) - (mean_return * mean_return)
-            var volatility = sqrt(max(variance, SIMD[DType.float16, 1](1e-8)))
+            var volatility = sqrt(variance if variance[0] > 1e-8 else SIMD[DType.float16, 1](1e-8))
             
             # Regime classification logic
             var bull_prob = SIMD[regime_indicators.dtype, 1](0.0)
@@ -434,9 +435,11 @@ struct MarketRegimeDetectorOp:
                 bear_prob += 0.2
             
             # Sideways market (low trend, mixed signals)
-            if abs(mean_return) < 0.005:  # Low trend
+            if (mean_return if mean_return[0] >= 0 else -mean_return)[0] < 0.005:  # Low trend
                 sideways_prob += 0.4
-            if abs(positive_returns - negative_returns) < len(returns) * 0.2:  # Mixed signals
+            var return_diff = positive_returns - negative_returns
+            var abs_return_diff = return_diff if return_diff >= 0 else -return_diff
+            if abs_return_diff < Int(Float64(len(returns)) * 0.2):  # Mixed signals
                 sideways_prob += 0.3
             if volatility > 0.15 and volatility < 0.25:  # Medium volatility
                 sideways_prob += 0.2
