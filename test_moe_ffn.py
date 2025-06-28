@@ -37,6 +37,8 @@ def test_finance_moe_ffn():
     mojo_kernels = Path(__file__).parent / "kernels"
     
     try:
+        print("🔧 Setting up graph...")
+        
         # Create graph with MoE FFN operation
         def moe_ffn_graph(
             hidden_states,
@@ -47,6 +49,7 @@ def test_finance_moe_ffn():
             domain_assignments,
             market_regime
         ):
+            print("📊 Creating custom operation...")
             return ops.custom(
                 name="finance_moe_ffn",
                 device=DeviceRef.from_device(device),
@@ -75,35 +78,42 @@ def test_finance_moe_ffn():
                 ],
             )
         
+        print("🔗 Building graph...")
         graph = Graph(
             "finance_moe_ffn_test",
             forward=moe_ffn_graph,
             input_types=[
-                TensorType(DType.float16, [batch_size, seq_len, hidden_size], DeviceRef.from_device(device)),
-                TensorType(DType.float16, [hidden_size, num_experts], DeviceRef.from_device(device)),
-                TensorType(DType.float16, [num_experts], DeviceRef.from_device(device)),
-                TensorType(DType.float16, [num_experts, hidden_size, intermediate_size], DeviceRef.from_device(device)),
-                TensorType(DType.float16, [num_experts, intermediate_size, hidden_size], DeviceRef.from_device(device)),
-                TensorType(DType.int32, [batch_size, seq_len], DeviceRef.from_device(device)),
-                TensorType(DType.float16, [batch_size], DeviceRef.from_device(device)),
+                TensorType(DType.float16, [batch_size, seq_len, hidden_size], DeviceRef.from_device(device)),  # hidden_states
+                TensorType(DType.float16, [num_experts, hidden_size], DeviceRef.from_device(device)),          # gate_weights  
+                TensorType(DType.float16, [num_experts], DeviceRef.from_device(device)),                       # gate_bias
+                TensorType(DType.float16, [num_experts, hidden_size, intermediate_size], DeviceRef.from_device(device)),  # up_weights
+                TensorType(DType.float16, [num_experts, intermediate_size, hidden_size], DeviceRef.from_device(device)),  # down_weights
+                TensorType(DType.int32, [batch_size, seq_len], DeviceRef.from_device(device)),                 # domain_assignments
+                TensorType(DType.float16, [1], DeviceRef.from_device(device)),                                 # market_regime
             ],
             custom_extensions=[mojo_kernels],
         )
+        print("✅ Graph created successfully")
         
         # Create session and load model
+        print("🎯 Creating inference session...")
         session = InferenceSession(devices=[device])
+        print("📦 Loading model...")
         model = session.load(graph)
+        print("✅ Model loaded successfully")
         
         # Generate test inputs
+        print("🎲 Generating test inputs...")
         np.random.seed(42)
         hidden_states = np.random.randn(batch_size, seq_len, hidden_size).astype(np.float16)
-        gate_weights = np.random.randn(hidden_size, num_experts).astype(np.float16)
+        gate_weights = np.random.randn(num_experts, hidden_size).astype(np.float16)  # Fixed shape
         gate_bias = np.random.randn(num_experts).astype(np.float16)
         up_weights = np.random.randn(num_experts, hidden_size, intermediate_size).astype(np.float16)
         down_weights = np.random.randn(num_experts, intermediate_size, hidden_size).astype(np.float16)
-        domain_assignments = np.random.randint(0, 6, (batch_size, seq_len)).astype(np.int32)
-        market_regime = np.random.rand(batch_size).astype(np.float16)
+        domain_assignments = np.random.randint(0, num_experts, (batch_size, seq_len)).astype(np.int32)
+        market_regime = np.random.rand(1).astype(np.float16)  # Fixed shape
         
+        print("📤 Converting inputs to tensors and moving to device...")
         # Convert to tensors and move to device
         inputs = [
             Tensor.from_numpy(hidden_states).to(device),
@@ -114,9 +124,12 @@ def test_finance_moe_ffn():
             Tensor.from_numpy(domain_assignments).to(device),
             Tensor.from_numpy(market_regime).to(device),
         ]
+        print("✅ Inputs prepared successfully")
         
         # Run inference
+        print("🚀 Running inference...")
         results = model.execute(*inputs)
+        print("✅ Inference completed successfully")
         
         # Get results
         output = results[0].to(CPU()).to_numpy()
@@ -142,11 +155,17 @@ def test_finance_moe_ffn():
         total_utilization = np.sum(expert_utilization)
         print(f"   Total expert utilization: {total_utilization:.3f}")
         
-        print("✅ Finance MoE FFN test passed!")
+        print("🎉 Finance MoE FFN test passed!")
+        print("=" * 60)
         return True
         
     except Exception as e:
         print(f"❌ Finance MoE FFN test failed: {e}")
+        print(f"❌ Error type: {type(e).__name__}")
+        import traceback
+        print("📋 Full traceback:")
+        traceback.print_exc()
+        print("=" * 60)
         return False
 
 if __name__ == "__main__":
