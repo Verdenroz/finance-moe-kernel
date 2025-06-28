@@ -5,11 +5,10 @@ Test Financial Load Balancing Kernel
 
 import numpy as np
 from pathlib import Path
-from max.graph import Graph, TensorType, ops
-from max.graph.api import DeviceRef, DType
-from max.inference import InferenceSession
-from max.tensor import Tensor
-from max.devices import CPU, GPU, Accelerator, accelerator_count
+from max.graph import Graph, TensorType, ops, DeviceRef
+from max.engine import InferenceSession
+from max.dtype import DType
+from max.driver import CPU, Accelerator, accelerator_count, Tensor
 
 def test_financial_load_balancing():
     """Test the financial load balancing kernel independently"""
