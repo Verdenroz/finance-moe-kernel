@@ -1,26 +1,33 @@
+import os
+import warnings
+from datetime import datetime, timedelta
+
 import torch
 import numpy as np
-import matplotlib.pyplot as plt
 import pandas as pd
 import yfinance as yf
-from datetime import datetime, timedelta
-from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
-import warnings
+import matplotlib.pyplot as plt
 warnings.filterwarnings('ignore')
 
 from model import FinanceMoEModel
+plt.ion()
 
 class RealDataFinanceDemo:
-    """Enhanced demo using real financial data for Finance MoE Router"""
+    """
+    Demo class that tests the Finance MoE Router with real market data from Yahoo Finance.
+    
+    This demo fetches live market data, processes it into model inputs, and creates
+    beautiful visualizations showing how the router intelligently selects experts
+    based on different market conditions and asset classes.
+    """
     
     def __init__(self):
         self.model = None
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
-        self.scaler = StandardScaler()
-        print(f"🚀 Enhanced demo running on: {self.device}")
+        print(f"🚀 Demo starting on: {self.device}")
         
-        # Define asset categories for intelligent routing
+        # Real ETFs and stocks representing different asset classes
         self.asset_categories = {
             'Equities': ['AAPL', 'MSFT', 'GOOGL', 'TSLA', 'NVDA'],
             'Fixed Income': ['TLT', 'IEF', 'SHY', 'HYG', 'LQD'],
@@ -31,44 +38,53 @@ class RealDataFinanceDemo:
         }
         
     def setup_model(self):
-        """Initialize the model"""
+        """Load and prepare the MoE model"""
         print("🔧 Setting up Finance MoE Model...")
         self.model = FinanceMoEModel().to(self.device)
         print("✅ Model ready!")
         
     def fetch_real_market_data(self, lookback_days=60):
-        """Fetch real market data from multiple asset classes"""
+        """
+        Download real market data from Yahoo Finance for all asset categories.
+        
+        Args:
+            lookback_days: How many days of historical data to fetch
+            
+        Returns:
+            all_data: Raw market data organized by asset category
+            market_scenarios: Market condition analysis for each category
+        """
         print(f"📡 Fetching {lookback_days} days of real market data...")
         
-        # Calculate date range
+        # Get dates - we fetch extra days to account for weekends/holidays
         end_date = datetime.now()
-        start_date = end_date - timedelta(days=lookback_days + 30)  # Extra buffer
+        start_date = end_date - timedelta(days=lookback_days + 30)
         
         all_data = {}
         market_scenarios = {}
         
         for category, tickers in self.asset_categories.items():
-            print(f"   📊 Fetching {category} data...")
+            print(f"   📊 Getting {category} data...")
             category_data = []
             
             for ticker in tickers:
                 try:
-                    # Fetch data
+                    # Download price data
                     stock = yf.Ticker(ticker)
                     hist = stock.history(start=start_date, end=end_date)
                     
                     if len(hist) > lookback_days:
-                        # Get the last lookback_days
+                        # Keep only the most recent data
                         hist = hist.tail(lookback_days)
                         
-                        # Calculate technical indicators
+                        # Calculate basic technical indicators
                         hist['Returns'] = hist['Close'].pct_change()
                         hist['Volatility'] = hist['Returns'].rolling(window=5).std()
                         hist['RSI'] = self.calculate_rsi(hist['Close'])
                         hist['SMA_10'] = hist['Close'].rolling(window=10).mean()
                         hist['SMA_20'] = hist['Close'].rolling(window=20).mean()
                         
-                        # Create features for embedding
+                        # Create normalized features for the model
                         features = pd.DataFrame({
                             'price_norm': (hist['Close'] - hist['Close'].mean()) / hist['Close'].std(),
                             'volume_norm': (hist['Volume'] - hist['Volume'].mean()) / hist['Volume'].std(),
@@ -87,13 +103,13 @@ class RealDataFinanceDemo:
                         })
                         
                 except Exception as e:
-                    print(f"   ⚠️  Failed to fetch {ticker}: {e}")
+                    print(f"   ⚠️  Couldn't get {ticker}: {e}")
                     continue
             
             if category_data:
                 all_data[category] = category_data
                 
-                # Create market scenario based on recent performance
+                # Figure out what kind of market we're in
                 recent_volatility = np.mean([
                     np.mean(data['volatility'][-10:]) 
                     for data in category_data if len(data['volatility']) >= 10
@@ -104,7 +120,7 @@ class RealDataFinanceDemo:
                     for data in category_data if len(data['returns']) >= 10
                 ])
                 
-                # Classify market condition
+                # Simple market condition classifier
                 if recent_volatility > 0.03 and recent_returns < -0.01:
                     condition = 'crisis'
                 elif recent_volatility > 0.02:
@@ -126,7 +142,7 @@ class RealDataFinanceDemo:
         return all_data, market_scenarios
     
     def calculate_rsi(self, prices, window=14):
-        """Calculate Relative Strength Index"""
+        """Calculate RSI indicator (0-100 scale)"""
         delta = prices.diff()
         gain = (delta.where(delta > 0, 0)).rolling(window=window).mean()
         loss = (-delta.where(delta < 0, 0)).rolling(window=window).mean()
@@ -135,7 +151,16 @@ class RealDataFinanceDemo:
         return rsi
     
     def prepare_model_inputs(self, market_data, target_length=50):
-        """Convert real market data to model inputs"""
+        """
+        Convert raw market data into the format our MoE model expects.
+        
+        Args:
+            market_data: Raw market data by category
+            target_length: How many time steps to use
+            
+        Returns:
+            Dictionary of processed tensors ready for the model
+        """
         print("🔄 Converting real data to model inputs...")
         
         processed_data = {}
@@ -144,7 +169,7 @@ class RealDataFinanceDemo:
             if not category_data:
                 continue
                 
-            # Combine features from all tickers in category
+            # Collect features from all tickers in this category
             all_features = []
             all_volatility = []
             all_risk_factors = []
@@ -152,34 +177,35 @@ class RealDataFinanceDemo:
             for ticker_data in category_data:
                 features = ticker_data['features'].values
                 if len(features) >= target_length:
-                    # Take the last target_length days
+                    # Use the most recent data
                     features = features[-target_length:]
                     volatility = ticker_data['volatility'][-target_length:]
                     returns = ticker_data['returns'][-target_length:]
                     
-                    # Extend features to 16 dimensions using PCA if needed
+                    # Our model expects exactly 16 features
                     if features.shape[1] < 16:
-                        # Pad with zeros or duplicate features
+                        # Add zeros if we don't have enough
                         padding = np.zeros((features.shape[0], 16 - features.shape[1]))
                         features = np.hstack([features, padding])
                     elif features.shape[1] > 16:
-                        # Use PCA to reduce dimensions
+                        # Use PCA to reduce if we have too many
                         pca = PCA(n_components=16)
                         features = pca.fit_transform(features)
                     
                     all_features.append(features)
                     all_volatility.append(volatility)
                     
-                    # Risk factors based on drawdown and volume
+                    # Risk is just absolute returns for now
                     risk = np.abs(returns).reshape(-1, 1)
                     all_risk_factors.append(risk)
             
             if all_features:
-                # Average across tickers in the same category
+                # Average everything across tickers in the same category
                 avg_features = np.mean(all_features, axis=0)
                 avg_volatility = np.mean(all_volatility, axis=0)
                 avg_risk = np.mean(all_risk_factors, axis=0)
                 
+                # Convert to PyTorch tensors
                 processed_data[category] = {
                     'embeddings': torch.tensor(
                         avg_features.reshape(1, -1, 16), 
@@ -201,8 +227,17 @@ class RealDataFinanceDemo:
         return processed_data
     
     def run_real_data_analysis(self, processed_data, market_scenarios):
-        """Run MoE routing analysis on real market data"""
-        print("🎯 Running real data routing analysis...")
+        """
+        Run the MoE model on real market data and see which experts it picks.
+        
+        Args:
+            processed_data: Tensors ready for the model
+            market_scenarios: Market condition info for context
+            
+        Returns:
+            Dictionary with predictions and routing results for each asset category
+        """
+        print("🎯 Running real data through the MoE router...")
         
         results = {}
         
@@ -226,24 +261,45 @@ class RealDataFinanceDemo:
                     }
                     
                 except Exception as e:
-                    print(f"   ⚠️  Failed to process {category}: {e}")
+                    print(f"   ⚠️  Couldn't process {category}: {e}")
                     continue
                     
         return results
-    
+        
     def create_matplotlib_visualizations(self, results):
-        """Create comprehensive matplotlib visualizations"""
-        print("📊 Creating matplotlib visualizations...")
+        """Create comprehensive and beautiful matplotlib visualizations in separate figures"""
+        print("Creating comprehensive visualizations...")
         
-        # Create figure with subplots
-        fig = plt.figure(figsize=(20, 16))
-        fig.suptitle('🏦 Finance MoE Router - Real Market Analysis', fontsize=20, fontweight='bold', y=0.95)
+        # Set global matplotlib style for better aesthetics
+        plt.style.use('default')
+        plt.rcParams.update({
+            'font.size': 12,
+            'font.family': 'sans-serif',
+            'axes.labelsize': 13,
+            'axes.titlesize': 16,
+            'xtick.labelsize': 11,
+            'ytick.labelsize': 11,
+            'legend.fontsize': 11,
+            'figure.titlesize': 20,
+            'axes.spines.top': False,
+            'axes.spines.right': False,
+            'axes.grid': True,
+            'grid.alpha': 0.3
+        })
+
+        figures = []
         
-        # Create a 3x3 grid for better layout
-        gs = fig.add_gridspec(3, 3, hspace=0.3, wspace=0.3)
+        # ===== FIGURE 1: Expert Routing Patterns =====
+        print("   Generating expert routing analysis...")
+        fig1 = plt.figure(figsize=(16, 8), facecolor='white')
+        fig1.suptitle('Expert Routing Analysis - Finance MoE Router', 
+                     fontsize=20, fontweight='bold', y=0.95, color='#2E3440')
         
-        # Plot 1: Expert selection heatmap
-        ax1 = fig.add_subplot(gs[0, :2])
+        gs1 = fig1.add_gridspec(1, 2, hspace=0.3, wspace=0.4, 
+                               left=0.08, right=0.92, top=0.85, bottom=0.15)
+        
+        # Left plot: Which expert does each asset category prefer?
+        ax1a = fig1.add_subplot(gs1[0, 0])
         categories = list(results.keys())
         expert_counts = []
         
@@ -254,92 +310,34 @@ class RealDataFinanceDemo:
         
         if expert_counts:
             expert_matrix = np.array(expert_counts)
-            im = ax1.imshow(expert_matrix, cmap='plasma', aspect='auto', interpolation='nearest')
-            ax1.set_title('🎯 Expert Selection by Asset Class', fontsize=14, fontweight='bold', pad=20)
-            ax1.set_xlabel('Expert Domain', fontsize=12)
-            ax1.set_ylabel('Asset Category', fontsize=12)
-            ax1.set_yticks(range(len(categories)))
-            ax1.set_yticklabels(categories, fontsize=10)
-            ax1.set_xticks(range(6))
+            im = ax1a.imshow(expert_matrix, cmap='Blues', aspect='auto', 
+                           interpolation='nearest', alpha=0.9)
+            ax1a.set_title('Expert Selection by Asset Class', 
+                          fontsize=16, fontweight='bold', pad=20, color='#2E3440')
+            ax1a.set_xlabel('Expert Domain', fontsize=13, color='#2E3440')
+            ax1a.set_ylabel('Asset Category', fontsize=13, color='#2E3440')
+            ax1a.set_yticks(range(len(categories)))
+            ax1a.set_yticklabels(categories, fontsize=11, color='#2E3440')
+            ax1a.set_xticks(range(6))
             
-            # Get domain names from the first result
             domain_names = list(results.values())[0]['domain_names']
-            ax1.set_xticklabels(domain_names, rotation=45, ha='right', fontsize=10)
+            ax1a.set_xticklabels(domain_names, rotation=45, ha='right', 
+                               fontsize=11, color='#2E3440')
             
-            # Add colorbar
-            cbar = plt.colorbar(im, ax=ax1, shrink=0.8)
-            cbar.set_label('Selection Count', fontsize=10)
+            cbar = plt.colorbar(im, ax=ax1a, shrink=0.8, pad=0.02)
+            cbar.set_label('Times Selected', fontsize=12, color='#2E3440')
+            cbar.ax.tick_params(labelsize=10, colors='#2E3440')
             
-            # Add text annotations
+            # Add numbers on the heatmap
             for i in range(len(categories)):
                 for j in range(6):
-                    text = ax1.text(j, i, f'{expert_matrix[i, j]}',
-                                   ha="center", va="center", color="white", fontweight='bold')
+                    value = expert_matrix[i, j]
+                    color = 'white' if value > expert_matrix.max() * 0.6 else '#2E3440'
+                    ax1a.text(j, i, f'{value}', ha="center", va="center", 
+                            color=color, fontweight='bold', fontsize=12)
         
-        # Plot 2: Market conditions scatter
-        ax2 = fig.add_subplot(gs[0, 2])
-        conditions = []
-        volatilities = []
-        returns = []
-        colors_list = []
-        
-        for i, (category, data) in enumerate(results.items()):
-            scenario = data['market_scenario']
-            conditions.append(category)
-            volatilities.append(scenario.get('volatility', 0))
-            returns.append(scenario.get('returns', 0) * 100)  # Convert to percentage
-            
-            # Color based on market condition
-            condition = scenario.get('condition', 'unknown')
-            if condition == 'crisis':
-                colors_list.append('red')
-            elif condition == 'high_volatility':
-                colors_list.append('orange')
-            elif condition == 'bull_market':
-                colors_list.append('green')
-            elif condition == 'bear_market':
-                colors_list.append('darkred')
-            else:
-                colors_list.append('blue')
-        
-        scatter = ax2.scatter(returns, volatilities, c=colors_list, s=120, alpha=0.8, edgecolors='black')
-        ax2.set_title('🌪️ Market Conditions:\nReturns vs Volatility', fontsize=12, fontweight='bold')
-        ax2.set_xlabel('Recent Returns (%)', fontsize=10)
-        ax2.set_ylabel('Volatility', fontsize=10)
-        ax2.grid(True, alpha=0.3)
-        
-        # Add labels with better positioning
-        for i, category in enumerate(conditions):
-            ax2.annotate(category, (returns[i], volatilities[i]), 
-                        xytext=(5, 5), textcoords='offset points', fontsize=8,
-                        bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.7))
-        
-        # Plot 3: Routing confidence over time
-        ax3 = fig.add_subplot(gs[1, :])
-        colors = plt.cm.Set3(np.linspace(0, 1, len(results)))
-        
-        for i, (category, data) in enumerate(results.items()):
-            probs = data['routing_probs'][0]
-            confidence = np.max(probs, axis=1)
-            volatility = data['volatility'][0]
-            
-            # Plot confidence
-            ax3.plot(confidence, label=f'{category} (Confidence)', 
-                    color=colors[i], linewidth=2.5, alpha=0.8)
-            
-            # Plot volatility (scaled) as thin line
-            ax3.plot(volatility * 5, '--', color=colors[i], 
-                    linewidth=1, alpha=0.5, label=f'{category} (Vol×5)')
-        
-        ax3.set_title('📈 Routing Confidence & Volatility Over Time', fontsize=14, fontweight='bold', pad=20)
-        ax3.set_xlabel('Time Steps (Trading Days)', fontsize=12)
-        ax3.set_ylabel('Confidence / Scaled Volatility', fontsize=12)
-        ax3.legend(bbox_to_anchor=(1.02, 1), loc='upper left', fontsize=9)
-        ax3.grid(True, alpha=0.3)
-        ax3.set_ylim(0, max(1.1, ax3.get_ylim()[1]))
-        
-        # Plot 4: Expert usage summary
-        ax4 = fig.add_subplot(gs[2, :2])
+        # Right plot: Overall popularity of each expert
+        ax1b = fig1.add_subplot(gs1[0, 1])
         all_assignments = []
         for data in results.values():
             all_assignments.extend(data['domain_assignments'].flatten())
@@ -348,152 +346,306 @@ class RealDataFinanceDemo:
             domain_counts = np.bincount(all_assignments, minlength=6)
             domain_names = list(results.values())[0]['domain_names']
             
-            colors_bar = plt.cm.viridis(np.linspace(0, 1, len(domain_names)))
-            bars = ax4.bar(range(len(domain_names)), domain_counts, 
-                          color=colors_bar, alpha=0.8, edgecolor='black')
-            ax4.set_title('🎪 Overall Expert Usage Distribution', fontsize=14, fontweight='bold', pad=20)
-            ax4.set_xlabel('Expert Domain', fontsize=12)
-            ax4.set_ylabel('Total Selections', fontsize=12)
-            ax4.set_xticks(range(len(domain_names)))
-            ax4.set_xticklabels(domain_names, rotation=45, ha='right', fontsize=10)
-            ax4.grid(True, axis='y', alpha=0.3)
+            colors_bar = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57', '#FF9FF3']
+            bars = ax1b.bar(range(len(domain_names)), domain_counts, 
+                           color=colors_bar[:len(domain_names)], alpha=0.8, 
+                           edgecolor='white', linewidth=2)
             
-            # Add value labels on bars
+            ax1b.set_title('Overall Expert Popularity', 
+                          fontsize=16, fontweight='bold', pad=20, color='#2E3440')
+            ax1b.set_xlabel('Expert Domain', fontsize=13, color='#2E3440')
+            ax1b.set_ylabel('Total Times Selected', fontsize=13, color='#2E3440')
+            ax1b.set_xticks(range(len(domain_names)))
+            ax1b.set_xticklabels(domain_names, rotation=45, ha='right', 
+                               fontsize=11, color='#2E3440')
+            ax1b.grid(True, axis='y', alpha=0.4, linestyle='--')
+            ax1b.set_facecolor('#FAFAFA')
+            
+            # Add count labels on bars
             for bar, count in zip(bars, domain_counts):
                 height = bar.get_height()
-                ax4.text(bar.get_x() + bar.get_width()/2., height + max(domain_counts)*0.01,
-                        f'{count}', ha='center', va='bottom', fontweight='bold', fontsize=10)
+                ax1b.text(bar.get_x() + bar.get_width()/2., height + max(domain_counts)*0.02,
+                         f'{count}', ha='center', va='bottom', fontweight='bold', 
+                         fontsize=12, color='#2E3440',
+                         bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8))
         
-        # Plot 5: Asset performance vs expert preference
-        ax5 = fig.add_subplot(gs[2, 2])
+        plt.tight_layout()
+        filename1 = 'finance_moe_expert_routing.png'
+        fig1.savefig(filename1, dpi=300, bbox_inches='tight', facecolor='white', pad_inches=0.3)
+        print(f"   Saved: {filename1}")
+        figures.append(fig1)
+        
+        # ===== FIGURE 2: Current Market Conditions =====
+        print("   Generating market conditions analysis...")
+        fig2 = plt.figure(figsize=(16, 8), facecolor='white')
+        fig2.suptitle('Market Conditions Analysis - Finance MoE Router', 
+                     fontsize=20, fontweight='bold', y=0.95, color='#2E3440')
+        
+        gs2 = fig2.add_gridspec(1, 2, hspace=0.3, wspace=0.4, 
+                               left=0.08, right=0.92, top=0.85, bottom=0.15)
+        
+        # Left: Scatter plot showing market conditions
+        ax2a = fig2.add_subplot(gs2[0, 0])
+        conditions = []
+        volatilities = []
+        returns = []
+        colors_list = []
+        
+        # Color code by market condition
+        color_map = {
+            'crisis': '#D32F2F', 'high_volatility': '#FF9800', 'bull_market': '#4CAF50',
+            'bear_market': '#9C27B0', 'sideways': '#2196F3', 'stable': '#2196F3', 'unknown': '#607D8B'
+        }
+        
+        for category, data in results.items():
+            scenario = data['market_scenario']
+            conditions.append(category)
+            volatilities.append(scenario.get('volatility', 0))
+            returns.append(scenario.get('returns', 0) * 100)
+            condition = scenario.get('condition', 'unknown')
+            colors_list.append(color_map.get(condition, color_map['unknown']))
+        
+        ax2a.scatter(returns, volatilities, c=colors_list, s=200, alpha=0.8, 
+                    edgecolors='white', linewidth=3, zorder=5)
+        ax2a.set_title('Returns vs Volatility by Asset Class', 
+                      fontsize=16, fontweight='bold', pad=20, color='#2E3440')
+        ax2a.set_xlabel('Recent Returns (%)', fontsize=13, color='#2E3440')
+        ax2a.set_ylabel('Volatility', fontsize=13, color='#2E3440')
+        ax2a.grid(True, alpha=0.4, linestyle='--')
+        ax2a.set_facecolor('#FAFAFA')
+        
+        # Add labels for each point
+        for i, category in enumerate(conditions):
+            ax2a.annotate(category, (returns[i], volatilities[i]), 
+                         xytext=(10, 10), textcoords='offset points', fontsize=11,
+                         bbox=dict(boxstyle='round,pad=0.5', facecolor='white', 
+                                 alpha=0.9, edgecolor='#E0E0E0'),
+                         color='#2E3440', fontweight='medium')
+        
+        # Right: Bar chart comparing volatility and returns
+        ax2b = fig2.add_subplot(gs2[0, 1])
+        categories = list(results.keys())
+        avg_volatility = [results[cat]['market_scenario'].get('volatility', 0) for cat in categories]
+        avg_returns = [results[cat]['market_scenario'].get('returns', 0) * 100 for cat in categories]
+        
+        x_pos = np.arange(len(categories))
+        width = 0.35
+        
+        ax2b.bar(x_pos - width/2, avg_volatility, width, label='Volatility', 
+                color='#FF6B6B', alpha=0.8, edgecolor='white', linewidth=2)
+        ax2b.bar(x_pos + width/2, avg_returns, width, label='Returns (%)', 
+                color='#4ECDC4', alpha=0.8, edgecolor='white', linewidth=2)
+        
+        ax2b.set_title('Market Stats by Category', 
+                      fontsize=16, fontweight='bold', pad=20, color='#2E3440')
+        ax2b.set_xlabel('Asset Categories', fontsize=13, color='#2E3440')
+        ax2b.set_ylabel('Values', fontsize=13, color='#2E3440')
+        ax2b.set_xticks(x_pos)
+        ax2b.set_xticklabels([cat[:10] + '...' if len(cat) > 10 else cat 
+                            for cat in categories], rotation=45, ha='right', 
+                           fontsize=11, color='#2E3440')
+        ax2b.legend(fontsize=12, frameon=True, fancybox=True, shadow=True)
+        ax2b.grid(True, alpha=0.4, linestyle='--')
+        ax2b.set_facecolor('#FAFAFA')
+        
+        plt.tight_layout()
+        filename2 = 'finance_moe_market_conditions.png'
+        fig2.savefig(filename2, dpi=300, bbox_inches='tight', facecolor='white', pad_inches=0.3)
+        print(f"   Saved: {filename2}")
+        figures.append(fig2)
+        
+        # ===== FIGURE 3: Time Series Analysis =====
+        print("   Generating time series analysis...")
+        fig3 = plt.figure(figsize=(18, 10), facecolor='white')
+        fig3.suptitle('Time Series Analysis - Model Confidence & Market Volatility', 
+                     fontsize=20, fontweight='bold', y=0.95, color='#2E3440')
+        
+        gs3 = fig3.add_gridspec(2, 1, hspace=0.4, 
+                               left=0.08, right=0.85, top=0.85, bottom=0.10)
+        
+        # Top: How confident is the model in its routing decisions?
+        ax3a = fig3.add_subplot(gs3[0, 0])
+        colors = ['#E91E63', '#9C27B0', '#673AB7', '#3F51B5', '#2196F3', '#00BCD4']
+        
+        for i, (category, data) in enumerate(results.items()):
+            probs = data['routing_probs'][0]
+            confidence = np.max(probs, axis=1)  # Highest probability = confidence
+            color = colors[i % len(colors)]
+            
+            ax3a.plot(confidence, label=f'{category}', 
+                     color=color, linewidth=3, alpha=0.9, marker='o', 
+                     markersize=5, markevery=max(1, len(confidence)//15))
+        
+        ax3a.set_title('How Confident is the Model?', 
+                      fontsize=16, fontweight='bold', pad=20, color='#2E3440')
+        ax3a.set_xlabel('Time Steps (Trading Days)', fontsize=13, color='#2E3440')
+        ax3a.set_ylabel('Routing Confidence', fontsize=13, color='#2E3440')
+        ax3a.legend(bbox_to_anchor=(1.02, 1), loc='upper left', fontsize=11)
+        ax3a.grid(True, alpha=0.4, linestyle='-', linewidth=0.5)
+        ax3a.set_facecolor('#FAFAFA')
+        ax3a.set_ylim(0, 1.05)
+        
+        # Add background zones to show confidence levels
+        ax3a.axhspan(0.8, 1.0, alpha=0.1, color='green', label='High Confidence')
+        ax3a.axhspan(0.6, 0.8, alpha=0.1, color='yellow', label='Medium Confidence')
+        ax3a.axhspan(0.0, 0.6, alpha=0.1, color='red', label='Low Confidence')
+        
+        # Bottom: How volatile are the markets?
+        ax3b = fig3.add_subplot(gs3[1, 0])
+        
+        for i, (category, data) in enumerate(results.items()):
+            volatility = data['volatility'][0]
+            color = colors[i % len(colors)]
+            
+            ax3b.plot(volatility, label=f'{category}', 
+                     color=color, linewidth=2.5, alpha=0.8, linestyle='--')
+        
+        ax3b.set_title('Market Volatility Over Time', 
+                      fontsize=16, fontweight='bold', pad=20, color='#2E3440')
+        ax3b.set_xlabel('Time Steps (Trading Days)', fontsize=13, color='#2E3440')
+        ax3b.set_ylabel('Volatility', fontsize=13, color='#2E3440')
+        ax3b.legend(bbox_to_anchor=(1.02, 1), loc='upper left', fontsize=11)
+        ax3b.grid(True, alpha=0.4, linestyle='-', linewidth=0.5)
+        ax3b.set_facecolor('#FAFAFA')
+        
+        plt.tight_layout()
+        filename3 = 'finance_moe_time_series.png'
+        fig3.savefig(filename3, dpi=300, bbox_inches='tight', facecolor='white', pad_inches=0.3)
+        print(f"   Saved: {filename3}")
+        figures.append(fig3)
+        
+        # ===== FIGURE 4: Performance Analysis =====
+        print("   Generating performance analysis...")
+        fig4 = plt.figure(figsize=(12, 8), facecolor='white')
+        fig4.suptitle('Performance Analysis - Asset Returns vs Expert Preferences', 
+                     fontsize=18, fontweight='bold', y=0.95, color='#2E3440')
+        
+        ax4 = fig4.add_subplot(111)
         performance_data = []
         expert_preference = []
         category_names = []
         
+        # For each asset category, see which expert it likes most
         for category, data in results.items():
-            # Get recent returns
             recent_return = data['market_scenario'].get('returns', 0) * 100
             performance_data.append(recent_return)
             
-            # Get most preferred expert
+            # Find the most popular expert for this category
             assignments = data['domain_assignments'].flatten()
             domain_counts = np.bincount(assignments, minlength=6)
             most_used_expert = np.argmax(domain_counts)
             expert_preference.append(most_used_expert)
             category_names.append(category)
         
-        # Create scatter plot with colors based on expert preference
-        colors_scatter = plt.cm.tab10(np.array(expert_preference))
-        scatter = ax5.scatter(performance_data, expert_preference, 
-                             c=colors_scatter, s=100, alpha=0.8, edgecolors='black')
-        ax5.set_title('🎭 Performance vs\nExpert Preference', fontsize=12, fontweight='bold')
-        ax5.set_xlabel('Recent Returns (%)', fontsize=10)
-        ax5.set_ylabel('Most Used Expert', fontsize=10)
-        ax5.grid(True, alpha=0.3)
-        ax5.set_yticks(range(6))
-        ax5.set_yticklabels([f'Expert {i}' for i in range(6)], fontsize=9)
+        colors_scatter = ['#E91E63', '#9C27B0', '#673AB7', '#3F51B5', '#2196F3', '#00BCD4']
+        ax4.scatter(performance_data, expert_preference, 
+                   c=[colors_scatter[i % len(colors_scatter)] for i in expert_preference], 
+                   s=250, alpha=0.8, edgecolors='white', linewidth=3, zorder=5)
         
-        # Add category labels
+        ax4.set_title('Do Better Assets Prefer Certain Experts?', 
+                     fontsize=16, fontweight='bold', pad=20, color='#2E3440')
+        ax4.set_xlabel('Recent Returns (%)', fontsize=13, color='#2E3440')
+        ax4.set_ylabel('Most Preferred Expert', fontsize=13, color='#2E3440')
+        ax4.grid(True, alpha=0.4, linestyle='--')
+        ax4.set_facecolor('#FAFAFA')
+        ax4.set_yticks(range(6))
+        
+        domain_names = list(results.values())[0]['domain_names']
+        ax4.set_yticklabels(domain_names, fontsize=11, color='#2E3440')
+        
+        # Label each point with the asset category
         for i, category in enumerate(category_names):
-            ax5.annotate(category, (performance_data[i], expert_preference[i]), 
-                        xytext=(5, 5), textcoords='offset points', fontsize=8,
-                        bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.7))
+            ax4.annotate(category, (performance_data[i], expert_preference[i]), 
+                        xytext=(15, 15), textcoords='offset points', fontsize=12,
+                        bbox=dict(boxstyle='round,pad=0.5', facecolor='white', 
+                                alpha=0.9, edgecolor='#E0E0E0'),
+                        color='#2E3440', fontweight='medium')
         
-        # Adjust layout and save
         plt.tight_layout()
-        plt.subplots_adjust(top=0.93)
+        filename4 = 'finance_moe_performance.png'
+        fig4.savefig(filename4, dpi=300, bbox_inches='tight', facecolor='white', pad_inches=0.3)
+        print(f"   Saved: {filename4}")
+        figures.append(fig4)
         
-        # Save the figure with high quality
-        filename = 'finance_moe_real_market_analysis.png'
-        plt.savefig(filename, dpi=300, bbox_inches='tight', facecolor='white')
-        print(f"✅ Saved comprehensive analysis: {filename}")
+        # Display all figures and keep them open
+        plt.show(block=True)
         
-        # Show the plot
-        plt.show()
+        print(f"\nCreated {len(figures)} visualization files:")
+        for i, filename in enumerate([filename1, filename2, filename3, filename4], 1):
+            print(f"   {i}. {filename}")
         
-        return fig
+        return figures
     
     def print_real_data_insights(self, results):
-        """Print insights from real market data analysis"""
+        """Print a human-readable summary of what we learned"""
         print("\n" + "="*70)
-        print("🧠 REAL MARKET DATA INSIGHTS - FINANCE MoE ROUTER")
+        print("🧠 WHAT WE LEARNED FROM REAL MARKET DATA")
         print("="*70)
         
         for category, data in results.items():
             scenario = data['market_scenario']
             print(f"\n📊 {category.upper()}:")
-            print(f"   Real Market Condition: {scenario.get('condition', 'unknown').replace('_', ' ').title()}")
-            print(f"   Recent Volatility: {scenario.get('volatility', 0):.4f}")
-            print(f"   Recent Returns: {scenario.get('returns', 0):.4f} ({scenario.get('returns', 0)*100:.2f}%)")
-            print(f"   Sample Tickers: {', '.join(data['tickers'][:3])}...")
+            print(f"   Market condition: {scenario.get('condition', 'unknown').replace('_', ' ').title()}")
+            print(f"   Volatility: {scenario.get('volatility', 0):.4f}")
+            print(f"   Recent returns: {scenario.get('returns', 0)*100:.2f}%")
+            print(f"   Example stocks: {', '.join(data['tickers'][:3])}...")
             
+            # Which expert did this category prefer?
             assignments = data['domain_assignments'].flatten()
             domain_counts = np.bincount(assignments, minlength=6)
             
-            # Find most and least used domains
             most_used = np.argmax(domain_counts)
             least_used = np.argmin(domain_counts)
             
-            print(f"   🎯 Most selected expert: {data['domain_names'][most_used]} ({domain_counts[most_used]} times)")
-            print(f"   🔽 Least selected expert: {data['domain_names'][least_used]} ({domain_counts[least_used]} times)")
+            print(f"   🎯 Favorite expert: {data['domain_names'][most_used]} ({domain_counts[most_used]} times)")
+            print(f"   🔽 Least favorite expert: {data['domain_names'][least_used]} ({domain_counts[least_used]} times)")
             
-            # Calculate routing confidence
+            # How confident was the model?
             probs = data['routing_probs'][0]
             avg_confidence = np.mean(np.max(probs, axis=1))
-            print(f"   🎪 Average routing confidence: {avg_confidence:.3f}")
-        
-        print("\n" + "="*70)
-        print("💡 KEY INSIGHTS FROM REAL DATA:")
-        print("✅ Model successfully processes real market data from Yahoo Finance")
-        print("✅ Routing adapts to actual market conditions (bull/bear/crisis)")
-        print("✅ Different asset classes trigger different expert preferences")
-        print("✅ Matplotlib provides clear, comprehensive visualizations")
-        print("✅ System ready for production deployment with live data feeds")
-        print("="*70)
+            print(f"   🎪 Average confidence: {avg_confidence:.3f}")
+
 
 def main():
-    """Enhanced main demo function with real data"""
-    print("🏦 ENHANCED FINANCE MOE ROUTER - REAL DATA DEMO")
-    print("=" * 60)
-    print("Testing intelligent routing with REAL financial market data!")
-    print("Data source: Yahoo Finance via yfinance library")
-    print("Visualizations: High-quality matplotlib charts")
+    """
+    Main demo function - downloads real market data and demonstrates MoE router performance.
+    """
+    print("FINANCE MOE ROUTER - REAL DATA ANALYSIS")
+    print("=" * 50)
+    print("Analyzing financial market data with MoE routing")
+    print("Data source: Yahoo Finance API")
     print()
     
     # Initialize demo
     demo = RealDataFinanceDemo()
     demo.setup_model()
     
-    # Fetch real market data
+    # Fetch market data
     market_data, market_scenarios = demo.fetch_real_market_data(lookback_days=50)
     
     if not market_data:
-        print("❌ Failed to fetch sufficient market data. Please check your internet connection.")
+        print("Error: Unable to fetch market data. Please check internet connection.")
         return
     
-    # Prepare inputs for the model
+    # Process data for model input
     processed_data = demo.prepare_model_inputs(market_data)
     
     if not processed_data:
-        print("❌ Failed to process market data. Please try again.")
+        print("Error: Data processing failed.")
         return
     
-    # Run analysis with real data
+    # Run analysis
     results = demo.run_real_data_analysis(processed_data, market_scenarios)
     
     if not results:
-        print("❌ Failed to run analysis. Please check the model.")
+        print("Error: Analysis execution failed.")
         return
     
-    # Create and display matplotlib visualizations
-    print("🎨 Creating comprehensive matplotlib visualizations...")
+    # Generate visualizations
     demo.create_matplotlib_visualizations(results)
     
-    # Print insights
+    # Display insights
     demo.print_real_data_insights(results)
     
-    print("\n🎉 Real data demo completed! Your system works with live market data!")
-    print("💡 Next steps: Deploy with real-time data feeds for production use!")
-
 if __name__ == "__main__":
     main()
