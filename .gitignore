@@ -7,3 +7,20 @@
 # Claude
 .claude
 CLAUDE.md
+
+# python
+*.html
+*.pyc
+*.pyo
+*.pyd
+__pycache__/
+
+
+# demo
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.svg
+*.webp
+*.html

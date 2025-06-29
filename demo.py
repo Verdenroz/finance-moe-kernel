@@ -2,13 +2,8 @@ import torch
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
-import plotly.graph_objects as go
-import plotly.express as px
-from plotly.subplots import make_subplots
 import yfinance as yf
 from datetime import datetime, timedelta
-import sys
-import os
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
 import warnings
@@ -236,143 +231,187 @@ class RealDataFinanceDemo:
                     
         return results
     
-    def create_real_data_visualizations(self, results):
-        """Create visualizations for real market data analysis"""
-        print("📊 Creating real data visualizations...")
+    def create_matplotlib_visualizations(self, results):
+        """Create comprehensive matplotlib visualizations"""
+        print("📊 Creating matplotlib visualizations...")
         
-        # 1. Real Market Conditions vs Expert Selection
-        fig1 = make_subplots(
-            rows=2, cols=3,
-            subplot_titles=list(results.keys()),
-            specs=[[{"type": "pie"}, {"type": "pie"}, {"type": "pie"}],
-                   [{"type": "pie"}, {"type": "pie"}, {"type": "pie"}]]
-        )
+        # Create figure with subplots
+        fig = plt.figure(figsize=(20, 16))
+        fig.suptitle('🏦 Finance MoE Router - Real Market Analysis', fontsize=20, fontweight='bold', y=0.95)
         
-        positions = [(1,1), (1,2), (1,3), (2,1), (2,2), (2,3)]
-        colors = px.colors.qualitative.Set3
+        # Create a 3x3 grid for better layout
+        gs = fig.add_gridspec(3, 3, hspace=0.3, wspace=0.3)
         
-        for idx, (category, data) in enumerate(results.items()):
-            if idx >= 6:  # Limit to 6 categories
-                break
-                
-            row, col = positions[idx]
-            
-            # Count domain assignments
-            assignments = data['domain_assignments'].flatten()
-            domain_counts = np.bincount(assignments, minlength=6)
-            
-            # Add market condition to title
-            condition = data['market_scenario'].get('condition', 'unknown')
-            title = f"{category}<br>({condition})"
-            
-            fig1.add_trace(
-                go.Pie(
-                    labels=data['domain_names'],
-                    values=domain_counts,
-                    name=category,
-                    marker=dict(colors=colors[:6]),
-                    title=title
-                ),
-                row=row, col=col
-            )
-        
-        fig1.update_layout(
-            title_text="🎯 Real Market Data: Expert Selection by Asset Class",
-            height=800,
-            showlegend=True
-        )
-        
-        # 2. Market Volatility vs Routing Confidence (Real Data)
-        fig2 = go.Figure()
+        # Plot 1: Expert selection heatmap
+        ax1 = fig.add_subplot(gs[0, :2])
+        categories = list(results.keys())
+        expert_counts = []
         
         for category, data in results.items():
-            # Calculate routing confidence
-            probs = data['routing_probs'][0]  # First batch
+            assignments = data['domain_assignments'].flatten()
+            domain_counts = np.bincount(assignments, minlength=6)
+            expert_counts.append(domain_counts)
+        
+        if expert_counts:
+            expert_matrix = np.array(expert_counts)
+            im = ax1.imshow(expert_matrix, cmap='plasma', aspect='auto', interpolation='nearest')
+            ax1.set_title('🎯 Expert Selection by Asset Class', fontsize=14, fontweight='bold', pad=20)
+            ax1.set_xlabel('Expert Domain', fontsize=12)
+            ax1.set_ylabel('Asset Category', fontsize=12)
+            ax1.set_yticks(range(len(categories)))
+            ax1.set_yticklabels(categories, fontsize=10)
+            ax1.set_xticks(range(6))
+            
+            # Get domain names from the first result
+            domain_names = list(results.values())[0]['domain_names']
+            ax1.set_xticklabels(domain_names, rotation=45, ha='right', fontsize=10)
+            
+            # Add colorbar
+            cbar = plt.colorbar(im, ax=ax1, shrink=0.8)
+            cbar.set_label('Selection Count', fontsize=10)
+            
+            # Add text annotations
+            for i in range(len(categories)):
+                for j in range(6):
+                    text = ax1.text(j, i, f'{expert_matrix[i, j]}',
+                                   ha="center", va="center", color="white", fontweight='bold')
+        
+        # Plot 2: Market conditions scatter
+        ax2 = fig.add_subplot(gs[0, 2])
+        conditions = []
+        volatilities = []
+        returns = []
+        colors_list = []
+        
+        for i, (category, data) in enumerate(results.items()):
+            scenario = data['market_scenario']
+            conditions.append(category)
+            volatilities.append(scenario.get('volatility', 0))
+            returns.append(scenario.get('returns', 0) * 100)  # Convert to percentage
+            
+            # Color based on market condition
+            condition = scenario.get('condition', 'unknown')
+            if condition == 'crisis':
+                colors_list.append('red')
+            elif condition == 'high_volatility':
+                colors_list.append('orange')
+            elif condition == 'bull_market':
+                colors_list.append('green')
+            elif condition == 'bear_market':
+                colors_list.append('darkred')
+            else:
+                colors_list.append('blue')
+        
+        scatter = ax2.scatter(returns, volatilities, c=colors_list, s=120, alpha=0.8, edgecolors='black')
+        ax2.set_title('🌪️ Market Conditions:\nReturns vs Volatility', fontsize=12, fontweight='bold')
+        ax2.set_xlabel('Recent Returns (%)', fontsize=10)
+        ax2.set_ylabel('Volatility', fontsize=10)
+        ax2.grid(True, alpha=0.3)
+        
+        # Add labels with better positioning
+        for i, category in enumerate(conditions):
+            ax2.annotate(category, (returns[i], volatilities[i]), 
+                        xytext=(5, 5), textcoords='offset points', fontsize=8,
+                        bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.7))
+        
+        # Plot 3: Routing confidence over time
+        ax3 = fig.add_subplot(gs[1, :])
+        colors = plt.cm.Set3(np.linspace(0, 1, len(results)))
+        
+        for i, (category, data) in enumerate(results.items()):
+            probs = data['routing_probs'][0]
             confidence = np.max(probs, axis=1)
             volatility = data['volatility'][0]
             
-            market_condition = data['market_scenario'].get('condition', 'unknown')
+            # Plot confidence
+            ax3.plot(confidence, label=f'{category} (Confidence)', 
+                    color=colors[i], linewidth=2.5, alpha=0.8)
             
-            fig2.add_trace(go.Scatter(
-                y=confidence,
-                mode='lines+markers',
-                name=f"{category} (Confidence)",
-                line=dict(width=2),
-                hovertemplate=f"<b>{category}</b><br>" +
-                            f"Market: {market_condition}<br>" +
-                            "Confidence: %{y:.3f}<br>" +
-                            "<extra></extra>"
-            ))
+            # Plot volatility (scaled) as thin line
+            ax3.plot(volatility * 5, '--', color=colors[i], 
+                    linewidth=1, alpha=0.5, label=f'{category} (Vol×5)')
+        
+        ax3.set_title('📈 Routing Confidence & Volatility Over Time', fontsize=14, fontweight='bold', pad=20)
+        ax3.set_xlabel('Time Steps (Trading Days)', fontsize=12)
+        ax3.set_ylabel('Confidence / Scaled Volatility', fontsize=12)
+        ax3.legend(bbox_to_anchor=(1.02, 1), loc='upper left', fontsize=9)
+        ax3.grid(True, alpha=0.3)
+        ax3.set_ylim(0, max(1.1, ax3.get_ylim()[1]))
+        
+        # Plot 4: Expert usage summary
+        ax4 = fig.add_subplot(gs[2, :2])
+        all_assignments = []
+        for data in results.values():
+            all_assignments.extend(data['domain_assignments'].flatten())
+        
+        if all_assignments:
+            domain_counts = np.bincount(all_assignments, minlength=6)
+            domain_names = list(results.values())[0]['domain_names']
             
-            # Add volatility as secondary trace
-            fig2.add_trace(go.Scatter(
-                y=volatility * 10,  # Scale for visibility
-                mode='lines',
-                name=f"{category} (Vol×10)",
-                line=dict(dash='dash', width=1),
-                opacity=0.6,
-                yaxis='y2'
-            ))
+            colors_bar = plt.cm.viridis(np.linspace(0, 1, len(domain_names)))
+            bars = ax4.bar(range(len(domain_names)), domain_counts, 
+                          color=colors_bar, alpha=0.8, edgecolor='black')
+            ax4.set_title('🎪 Overall Expert Usage Distribution', fontsize=14, fontweight='bold', pad=20)
+            ax4.set_xlabel('Expert Domain', fontsize=12)
+            ax4.set_ylabel('Total Selections', fontsize=12)
+            ax4.set_xticks(range(len(domain_names)))
+            ax4.set_xticklabels(domain_names, rotation=45, ha='right', fontsize=10)
+            ax4.grid(True, axis='y', alpha=0.3)
+            
+            # Add value labels on bars
+            for bar, count in zip(bars, domain_counts):
+                height = bar.get_height()
+                ax4.text(bar.get_x() + bar.get_width()/2., height + max(domain_counts)*0.01,
+                        f'{count}', ha='center', va='bottom', fontweight='bold', fontsize=10)
         
-        fig2.update_layout(
-            title="📊 Real Market: Router Confidence vs Volatility",
-            xaxis_title="Time Steps (Trading Days)",
-            yaxis_title="Routing Confidence",
-            yaxis2=dict(
-                title="Market Volatility (×10)",
-                overlaying='y',
-                side='right'
-            ),
-            height=600
-        )
-        
-        # 3. Asset Category Performance vs Expert Preference
+        # Plot 5: Asset performance vs expert preference
+        ax5 = fig.add_subplot(gs[2, 2])
         performance_data = []
         expert_preference = []
-        categories = []
+        category_names = []
         
         for category, data in results.items():
             # Get recent returns
-            recent_return = data['market_scenario'].get('returns', 0)
-            performance_data.append(recent_return * 100)  # Convert to percentage
+            recent_return = data['market_scenario'].get('returns', 0) * 100
+            performance_data.append(recent_return)
             
             # Get most preferred expert
             assignments = data['domain_assignments'].flatten()
             domain_counts = np.bincount(assignments, minlength=6)
             most_used_expert = np.argmax(domain_counts)
             expert_preference.append(most_used_expert)
-            categories.append(category)
+            category_names.append(category)
         
-        fig3 = go.Figure()
+        # Create scatter plot with colors based on expert preference
+        colors_scatter = plt.cm.tab10(np.array(expert_preference))
+        scatter = ax5.scatter(performance_data, expert_preference, 
+                             c=colors_scatter, s=100, alpha=0.8, edgecolors='black')
+        ax5.set_title('🎭 Performance vs\nExpert Preference', fontsize=12, fontweight='bold')
+        ax5.set_xlabel('Recent Returns (%)', fontsize=10)
+        ax5.set_ylabel('Most Used Expert', fontsize=10)
+        ax5.grid(True, alpha=0.3)
+        ax5.set_yticks(range(6))
+        ax5.set_yticklabels([f'Expert {i}' for i in range(6)], fontsize=9)
         
-        # Create scatter plot
-        fig3.add_trace(go.Scatter(
-            x=performance_data,
-            y=expert_preference,
-            mode='markers+text',
-            text=categories,
-            textposition="top center",
-            marker=dict(
-                size=15,
-                color=expert_preference,
-                colorscale='Viridis',
-                showscale=True,
-                colorbar=dict(title="Expert Domain")
-            ),
-            hovertemplate="<b>%{text}</b><br>" +
-                        "Recent Return: %{x:.2f}%<br>" +
-                        "Preferred Expert: %{y}<br>" +
-                        "<extra></extra>"
-        ))
+        # Add category labels
+        for i, category in enumerate(category_names):
+            ax5.annotate(category, (performance_data[i], expert_preference[i]), 
+                        xytext=(5, 5), textcoords='offset points', fontsize=8,
+                        bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.7))
         
-        fig3.update_layout(
-            title="🎪 Real Market: Asset Performance vs Expert Preference",
-            xaxis_title="Recent Returns (%)",
-            yaxis_title="Most Used Expert Domain",
-            height=500
-        )
+        # Adjust layout and save
+        plt.tight_layout()
+        plt.subplots_adjust(top=0.93)
         
-        return fig1, fig2, fig3
+        # Save the figure with high quality
+        filename = 'finance_moe_real_market_analysis.png'
+        plt.savefig(filename, dpi=300, bbox_inches='tight', facecolor='white')
+        print(f"✅ Saved comprehensive analysis: {filename}")
+        
+        # Show the plot
+        plt.show()
+        
+        return fig
     
     def print_real_data_insights(self, results):
         """Print insights from real market data analysis"""
@@ -385,7 +424,7 @@ class RealDataFinanceDemo:
             print(f"\n📊 {category.upper()}:")
             print(f"   Real Market Condition: {scenario.get('condition', 'unknown').replace('_', ' ').title()}")
             print(f"   Recent Volatility: {scenario.get('volatility', 0):.4f}")
-            print(f"   Recent Returns: {scenario.get('returns', 0):.4f}")
+            print(f"   Recent Returns: {scenario.get('returns', 0):.4f} ({scenario.get('returns', 0)*100:.2f}%)")
             print(f"   Sample Tickers: {', '.join(data['tickers'][:3])}...")
             
             assignments = data['domain_assignments'].flatten()
@@ -408,7 +447,7 @@ class RealDataFinanceDemo:
         print("✅ Model successfully processes real market data from Yahoo Finance")
         print("✅ Routing adapts to actual market conditions (bull/bear/crisis)")
         print("✅ Different asset classes trigger different expert preferences")
-        print("✅ Mojo kernels provide 10x+ speedup for real-time processing")
+        print("✅ Matplotlib provides clear, comprehensive visualizations")
         print("✅ System ready for production deployment with live data feeds")
         print("="*70)
 
@@ -418,6 +457,7 @@ def main():
     print("=" * 60)
     print("Testing intelligent routing with REAL financial market data!")
     print("Data source: Yahoo Finance via yfinance library")
+    print("Visualizations: High-quality matplotlib charts")
     print()
     
     # Initialize demo
@@ -445,14 +485,9 @@ def main():
         print("❌ Failed to run analysis. Please check the model.")
         return
     
-    # Create visualizations
-    fig1, fig2, fig3 = demo.create_real_data_visualizations(results)
-    
-    # Show plots
-    print("🎨 Displaying real data visualizations...")
-    fig1.show()
-    fig2.show() 
-    fig3.show()
+    # Create and display matplotlib visualizations
+    print("🎨 Creating comprehensive matplotlib visualizations...")
+    demo.create_matplotlib_visualizations(results)
     
     # Print insights
     demo.print_real_data_insights(results)
