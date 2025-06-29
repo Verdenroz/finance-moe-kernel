@@ -2,11 +2,93 @@
 
 ## Overview
 
-This project implements a high-performance Finance Mixture of Experts (MoE) system that combines Mojo compute kernels with PyTorch models. The system intelligently routes financial data to specialized expert domains based on asset characteristics and market conditions, providing optimal processing for different types of financial instruments.
+This project implements a high-performance Finance Mixture of Experts (MoE) system that combines Mojo compute kernels with PyTorch models. The system intelligently routes financial data to specialized expert domains based on asset characteristics and market conditions, providing optimal processing for different types of financial instruments.  Think of it as a smart traffic controller for financial instruments - it analyzes incoming market data and directs it to the most appropriate specialized "expert" based on the asset's characteristics and current market conditions.
 
 I am a complete beginner in Mojo, but I have great interest in finance and machine learning. This project serves as a practical introduction to Mojo's capabilities, particularly in the context of financial data processing.
 
 ![Expert Routing Analysis](finance_moe_expert_routing_real_data.png)
+
+### The Four Financial Domains
+
+The system categorizes all financial instruments into four distinct expert domains, each designed to handle specific types of assets:
+
+#### 1. **Equities Domain**
+- **What it handles**: Stocks, ETFs, equity indices
+- **Characteristics**: Moderate volatility (1.5-4%), trending behavior, momentum patterns
+- **Examples**: AAPL, MSFT, SPY, sector ETFs
+- **Specialized for**: Growth patterns, earnings impacts, market sentiment analysis
+
+#### 2. **Fixed Income Domain** 
+- **What it handles**: Bonds, Treasuries, TIPS, municipal bonds
+- **Characteristics**: Very low volatility (<0.5%), stable, duration-sensitive
+- **Examples**: TLT, IEF, AGG, government bonds
+- **Specialized for**: Interest rate sensitivity, credit spreads, duration risk
+
+#### 3. **Commodities Domain**
+- **What it handles**: Gold, oil, agricultural products, metals
+- **Characteristics**: Seasonal patterns, supply/demand shocks, moderate volatility (1-2.5%)
+- **Examples**: GLD, USO, DBA, copper futures
+- **Specialized for**: Weather impacts, geopolitical events, storage costs
+
+#### 4. **Derivatives Domain**
+- **What it handles**: Options, futures, leveraged ETFs, volatility products
+- **Characteristics**: High volatility (>3%), non-linear payoffs, complex Greeks
+- **Examples**: VXX, TQQQ, SQQQ, options contracts
+- **Specialized for**: Gamma effects, time decay, leverage amplification
+
+## Multi-Stage Routing Decision Process
+
+The system uses a sophisticated **multi-stage decision tree** that combines several analytical approaches:
+
+### Stage 1: Feature Extraction
+```mojo
+// From the Mojo kernel - extracts 64 features from 32 input dimensions
+extracted_features = ReLU(input_embeddings × weights + bias)
+```
+- Transforms raw market data into 64 high-level features
+- Uses vectorized SIMD operations for performance
+- Captures complex patterns and relationships
+
+### Stage 2: Multiple Router Analysis
+
+The system runs **four parallel routing computations**:
+
+#### **Base Router (Domain Classifier)**
+- Uses the extracted features directly
+- Learns general patterns for each asset class
+- Weight: 1.2x in final decision
+
+#### **Volatility Router** 
+- Analyzes recent volatility patterns
+- Two-layer neural network: volatility → 8 hidden units → domain scores
+- Key for distinguishing high-vol derivatives from low-vol bonds
+- Weight: 1.0x in final decision
+
+#### **Risk Router**
+- Examines risk factor exposure 
+- Similar architecture to volatility router
+- Captures downside risk, tail events
+- Weight: 0.8x in final decision
+
+#### **Statistical Router**
+- Computes embedding statistics (mean, variance, absolute mean)
+- Three-layer network: stats[3] → 12 hidden → domain scores  
+- Identifies distribution characteristics
+- Weight: 0.6x in final decision
+
+### Stage 3: Intelligent Combination
+```mojo
+// Weighted combination of all routing signals
+final_logit = 1.20 * base_logits + 
+              1.00 * vol_logits + 
+              0.80 * risk_logits + 
+              0.60 * stats_logits
+```
+
+### Stage 4: Domain Assignment
+- Applies softmax to get probabilities
+- Selects highest-probability domain
+- Maintains confidence scores for uncertainty quantification
 
 ## Architecture
 
