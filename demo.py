@@ -213,7 +213,7 @@ class RealDataFinanceDemo:
                         device=self.device
                     ),
                     'volatility': torch.tensor(
-                        avg_volatility.reshape(1, -1), 
+                        avg_volatility.reshape(1, -1, 1), 
                         dtype=torch.float32, 
                         device=self.device
                     ),
