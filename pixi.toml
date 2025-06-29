@@ -1,21 +1,41 @@
-[workspace]
-authors = ["harvey <harveytseng2@gmail.com>"]
-channels = ["https://conda.modular.com/max-nightly", "conda-forge"]
+[project]
 name = "finance-moe-kernel"
-platforms = ["linux-64", "linux-aarch64"]
 version = "0.1.0"
+authors = ["harvey <harveytseng2@gmail.com>"]
+channels = ["https://conda.modular.com/max-nightly", "https://prefix.dev/conda-forge"]
+platforms = ["linux-64", "linux-aarch64"]
 
 [tasks]
 
 [dependencies]
+python = ">=3.11,<3.13"
 modular = ">=25.5.0.dev2025062815,<26"
-pytorch = ">=2.7.1,<3"
-torchvision = ">=0.22.0,<0.23"
 matplotlib = ">=3.10.3,<4"
 pandas = ">=2.3.0,<3"
 numpy = ">=2.3.0,<3"
 jupyter = ">=1.1.1,<2"
 scikit-learn = ">=1.7.0,<2"
 
+# GPU environment feature
+[feature.gpu]
+system-requirements = { cuda = "12.0" }
+
+[feature.gpu.dependencies]
+cuda-version = "12.6.*"
+pytorch-gpu = "*"
+torchvision = "*"
+
+# CPU environment feature  
+[feature.cpu.dependencies]
+pytorch-cpu = "*"
+torchvision = "*"
+
+# PyPI dependencies (same for both environments)
 [pypi-dependencies]
 yfinance = ">=0.2.64, <0.3"
+
+# Define environments
+[environments]
+default = { features = ["gpu"] }  # GPU as default
+cpu = { features = ["cpu"] }      # CPU-only environment
+gpu = { features = ["gpu"] }      # Explicit GPU environment
