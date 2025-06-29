@@ -7,67 +7,90 @@ from builtin.math import abs, max, min
 from memory import stack_allocation
 from algorithm import vectorize
 
+# Model configuration constants
 alias HIDDEN_SIZE = 16
 alias NUM_DOMAINS = 6
+alias VECTORIZATION_WIDTH = 4
+alias MAX_LOGIT_VALUE = 20.0
+alias MIN_LOGIT_VALUE = -20.0
+alias NUMERICAL_EPSILON = 1e-8
 
 @always_inline
 fn compute_domain_score(
-    domain: Int, volatility: Float32, risk: Float32,
-    emb_mean: Float32, emb_var: Float32, emb_abs_mean: Float32
+    domain: Int, 
+    volatility: Float32, 
+    risk: Float32,
+    emb_mean: Float32, 
+    emb_var: Float32, 
+    emb_abs_mean: Float32
 ) -> Float32:
     """
-    Enhanced domain scoring with improved asset classification logic.
-    Each domain has specific volatility ranges and feature patterns.
+    Compute domain-specific scoring for financial asset classification.
+    
+    Each domain has carefully tuned scoring logic based on real financial characteristics:
+    - Volatility ranges specific to each asset class
+    - Statistical patterns (variance, mean, absolute mean) that distinguish domains
+    - Risk factor correlations specific to each financial instrument type
+    
+    Args:
+        domain: Domain index (0-5)
+        volatility: Market volatility measurement
+        risk: Risk factor score
+        emb_mean: Mean of embedding features
+        emb_var: Variance of embedding features  
+        emb_abs_mean: Absolute mean of embedding features
+        
+    Returns:
+        Domain-specific score (higher = better match)
     """
     var score: Float32 = 0.0
     
-    if domain == 0:  # Equities - moderate volatility (1.5-4%), momentum patterns
-        # Strong volatility preference for equity range
+    if domain == 0:  # EQUITIES - Moderate volatility with momentum patterns
+        # Optimal volatility range: 1.5-4%
         if volatility >= 0.015 and volatility <= 0.04:
-            score += 40.0  # Strong bonus for optimal range
+            score += 40.0  # Strong preference for equity volatility range
         else:
             score -= abs(volatility - 0.025) * 200.0  # Heavy penalty outside range
         
-        # Moderate momentum and variance bonus
-        score += abs(emb_mean) * 25.0  # Momentum component
+        # Momentum patterns (key equity characteristic)
+        score += abs(emb_mean) * 25.0  # Reward directional momentum
         score += min(emb_var * 10.0, Float32(20.0))  # Moderate variance bonus, capped
         
-    elif domain == 1:  # Fixed Income - very low volatility (<0.5%), high stability
-        # Ultra-low volatility requirement
+    elif domain == 1:  # FIXED INCOME - Ultra-low volatility with high stability
+        # Ultra-low volatility requirement: <0.5%
         if volatility < 0.005:
-            score += 50.0 - volatility * 5000.0  # Strong bonus, scaled by how low
+            score += 50.0 - volatility * 5000.0  # Strong bonus scaled by low volatility
         else:
             score -= volatility * 2000.0  # Heavy penalty for high volatility
         
-        # Stability bonuses - penalize high variance and risk
-        score += max(Float32(0.0), (Float32(0.2) - emb_var)) * 50.0  # Bonus for low variance
-        score += max(Float32(0.0), (Float32(0.01) - abs(risk))) * 100.0  # Bonus for low risk
-        score += max(Float32(0.0), (Float32(0.1) - emb_abs_mean)) * 30.0  # Bonus for stability
+        # Stability characteristics (key fixed income traits)
+        score += max(Float32(0.0), (Float32(0.2) - emb_var)) * 50.0  # Reward low variance
+        score += max(Float32(0.0), (Float32(0.01) - abs(risk))) * 100.0  # Reward low risk
+        score += max(Float32(0.0), (Float32(0.1) - emb_abs_mean)) * 30.0  # Reward stability
         
-    elif domain == 2:  # Commodities - moderate volatility (1-2.5%), cyclical patterns
-        # Optimal volatility range
+    elif domain == 2:  # COMMODITIES - Moderate volatility with strong cyclical patterns
+        # Optimal volatility range: 1-2.5%
         if volatility >= 0.01 and volatility <= 0.025:
-            score += 35.0
+            score += 35.0  # Preference for commodity volatility range
         else:
-            score -= abs(volatility - 0.0175) * 150.0
+            score -= abs(volatility - 0.0175) * 150.0  # Penalty outside range
         
-        # Strong variance requirement (cyclical patterns)
+        # Cyclical patterns (key commodity characteristic)
         if emb_var > 0.5:
-            score += min((emb_var - Float32(0.5)) * 20.0, Float32(40.0))  # Bonus for high variance
+            score += min((emb_var - Float32(0.5)) * 20.0, Float32(40.0))  # Reward high variance
         else:
             score -= (Float32(0.5) - emb_var) * 25.0  # Penalty for low variance
         
-        # Moderate absolute mean bonus
-        score += emb_abs_mean * 15.0
+        score += emb_abs_mean * 15.0  # Moderate absolute mean bonus
         
-    elif domain == 3:  # FX - low-moderate volatility (0.5-1.3%), strong trending
-        # Optimal volatility range
+    elif domain == 3:  # FX - Low-moderate volatility with strong trending behavior
+        # Optimal volatility range: 0.5-1.3%
         if volatility >= 0.005 and volatility <= 0.013:
-            score += 40.0
+            score += 40.0  # Strong preference for FX volatility range
         else:
-            score -= abs(volatility - 0.009) * 200.0
+            score -= abs(volatility - 0.009) * 200.0  # Heavy penalty outside range
         
-        # Very strong trending requirement (key FX differentiator)
+        # Strong trending behavior (key FX differentiator)
         if abs(emb_mean) > 1.5:  # Very strong trend
             score += 60.0 + (abs(emb_mean) - 1.5) * 20.0
         elif abs(emb_mean) > 0.8:  # Strong trend
@@ -77,101 +100,117 @@ fn compute_domain_score(
         else:  # Weak trend - strong penalty
             score -= (0.3 - abs(emb_mean)) * 50.0
         
-        # Moderate risk tolerance
+        # Risk factor considerations
         score += max(Float32(0.0), (Float32(0.05) - abs(risk))) * 15.0
         
-        # Penalize very high variance (distinguish from commodities)
+        # Distinguish from commodities (penalize very high variance)
         if emb_var > 3.0:
             score -= (emb_var - 3.0) * 10.0
         
-    elif domain == 4:  # Derivatives - high volatility (>3%), complex patterns
-        # High volatility requirement
+    elif domain == 4:  # DERIVATIVES - High volatility with complex patterns
+        # High volatility requirement: >3%
         if volatility > 0.03:
             score += min(volatility * 150.0, Float32(80.0))  # Strong bonus, capped
         else:
-            score -= (Float32(0.03) - volatility) * 300.0  # Heavy penalty
+            score -= (Float32(0.03) - volatility) * 300.0  # Heavy penalty for low volatility
         
-        # High variance and complexity bonuses
+        # Complex patterns (key derivative characteristics)
         score += min(emb_var * 20.0, Float32(60.0))  # High variance bonus
         score += min(abs(risk) * 30.0, Float32(50.0))  # High risk bonus
+        score += min(emb_abs_mean * 8.0, Float32(25.0))  # Complexity bonus
         
-        # Bonus for high absolute mean (complex patterns)
-        score += min(emb_abs_mean * 8.0, Float32(25.0))
-        
-    else:  # Credit - low volatility (0.2-0.8%), jump patterns, moderate variance
-        # Optimal volatility range (higher than fixed income)
+    else:  # CREDIT - Low volatility with jump patterns and moderate variance
+        # Optimal volatility range: 0.2-0.8% (higher than fixed income)
         if volatility >= 0.002 and volatility <= 0.008:
-            score += 40.0
+            score += 40.0  # Strong preference for credit volatility range
         else:
-            score -= abs(volatility - 0.005) * 250.0
+            score -= abs(volatility - 0.005) * 250.0  # Heavy penalty outside range
         
-        # Moderate variance requirement (higher than fixed income, lower than commodities)
+        # Moderate variance requirement (jump patterns)
         if emb_var >= 0.3 and emb_var <= 3.0:
             score += 35.0 - abs(emb_var - 1.2) * 8.0  # Optimal around 1.2
         else:
-            score -= abs(emb_var - 1.2) * 20.0
+            score -= abs(emb_var - 1.2) * 20.0  # Penalty for extreme variance
         
-        # Penalize strong trending (distinguish from FX)
+        # Distinguish from FX (penalize strong trending)
         if abs(emb_mean) > 0.8:
-            score -= abs(emb_mean) * 25.0
+            score -= abs(emb_mean) * 25.0  # Penalty for strong trends
         else:
             score += (Float32(0.8) - abs(emb_mean)) * 5.0  # Small bonus for low trending
         
-        # Moderate risk bonus
+        # Credit-specific risk characteristics
         score += max(Float32(0.0), (Float32(0.02) - abs(abs(risk) - Float32(0.01)))) * 50.0
     
     return score
 
 @always_inline 
-fn compute_heuristic_domain(volatility: Float32, emb_var: Float32, emb_mean: Float32) -> Int32:
+fn compute_heuristic_domain(
+    volatility: Float32, 
+    emb_var: Float32, 
+    emb_mean: Float32
+) -> Int32:
     """
-    Improved heuristic fallback with better domain separation logic.
-    Used when confidence is low to make more accurate predictions.
+    Intelligent heuristic fallback for low-confidence routing decisions.
+    
+    When the main scoring system produces low confidence predictions, this function
+    provides rule-based classification using clear decision boundaries based on
+    the most distinguishing characteristics of each financial domain.
+    
+    Decision tree logic:
+    1. High volatility → Derivatives (clear separator)
+    2. Ultra-low volatility → Fixed Income vs Credit (variance-based)
+    3. Low-moderate volatility → FX vs Credit (trend-based)
+    4. Moderate volatility → Commodities vs Equities (variance-based)
+    
+    Args:
+        volatility: Market volatility measurement
+        emb_var: Embedding variance (cyclical/complexity indicator)
+        emb_mean: Embedding mean (trend strength indicator)
+        
+    Returns:
+        Domain ID (0-5) based on heuristic rules
     """
-    # High volatility -> Derivatives (clear separation)
+    # Clear high volatility separator: Derivatives
     if volatility > 0.03:
-        return Int32(4)
+        return Int32(4)  # Derivatives
     
-    # Very low volatility -> Fixed Income or Credit
+    # Ultra-low volatility: Fixed Income vs Credit decision
     elif volatility < 0.005:
-        if emb_var < 0.15:  # Very stable -> Fixed Income
-            return Int32(1)
-        else:  # Some variance -> Credit
-            return Int32(5)
-    
-    # Low-moderate volatility range (0.005-0.013) -> FX vs Credit decision
-    elif volatility >= 0.005 and volatility <= 0.013:
-        # Strong trending strongly indicates FX
-        if abs(emb_mean) > 1.5:
-            return Int32(3)  # FX
-        # Moderate trending with reasonable variance -> FX
-        elif abs(emb_mean) > 0.8 and emb_var < 5.0:
-            return Int32(3)  # FX
-        # Low trending with moderate variance -> Credit
-        elif abs(emb_mean) < 0.6 and emb_var >= 0.5 and emb_var <= 4.0:
+        if emb_var < 0.15:  # Very stable patterns
+            return Int32(1)  # Fixed Income
+        else:  # Some variance (jump patterns)
             return Int32(5)  # Credit
-        else:
-            return Int32(3)  # Default to FX
     
-    # Moderate volatility range (0.01-0.025) -> Commodities vs Equities
-    elif volatility >= 0.01 and volatility <= 0.025:
-        # High variance indicates cyclical patterns -> Commodities
-        if emb_var > 0.6:
-            return Int32(2)  # Commodities
+    # Low-moderate volatility range: FX vs Credit decision
+    elif volatility >= 0.005 and volatility <= 0.013:
+        # Strong trending behavior strongly indicates FX
+        if abs(emb_mean) > 1.5:
+            return Int32(3)  # FX - very strong trend
+        elif abs(emb_mean) > 0.8 and emb_var < 5.0:
+            return Int32(3)  # FX - strong trend with reasonable variance
+        elif abs(emb_mean) < 0.6 and emb_var >= 0.5 and emb_var <= 4.0:
+            return Int32(5)  # Credit - low trend with moderate variance
         else:
+            return Int32(3)  # Default to FX for this volatility range
+    
+    # Moderate volatility range: Commodities vs Equities decision
+    elif volatility >= 0.01 and volatility <= 0.025:
+        if emb_var > 0.6:  # High variance indicates cyclical patterns
+            return Int32(2)  # Commodities
+        else:  # Lower variance indicates momentum patterns
             return Int32(0)  # Equities
     
-    # Higher moderate volatility -> likely Equities unless very high
+    # Higher moderate volatility: likely Equities
     elif volatility > 0.015 and volatility <= 0.04:
         return Int32(0)  # Equities
     
-    # Very high volatility -> Derivatives
+    # Remaining high volatility: Derivatives
     elif volatility > 0.025:
         return Int32(4)  # Derivatives
     
-    # Default fallback
+    # Fallback to FX as most versatile domain
     else:
-        return Int32(3)  # FX as reasonable default
+        return Int32(3)  # FX
 
 @register("finance_router")
 struct FinanceRouter:
