@@ -20,9 +20,9 @@ alias TILE_SIZE = 32
 alias PARALLEL_WORK_SIZE = 4
 
 
-@register("mojo_feature_extractor")
-struct MojoFeatureExtractor:
-    """Mojo-powered feature extraction replacing PyTorch Sequential layers."""
+@register("feature_extractor")
+struct FeatureExtractor:
+    """Feature extraction replacing PyTorch Sequential layers."""
     @staticmethod
     fn execute[
         target: StaticString,
@@ -89,9 +89,9 @@ struct MojoFeatureExtractor:
         ](output_features, ctx)
 
 
-@register("mojo_all_routers")
-struct MojoAllRouters:
-    """Single Mojo kernel handling ALL router computations."""
+@register("multi_router")
+struct MultiRouter:
+    """Single kernel handling ALL router computations."""
     @staticmethod
     fn execute[
         target: StaticString,
@@ -212,8 +212,8 @@ struct MojoAllRouters:
         ](base_logits, ctx)
 
 
-@register("mojo_master_router")
-struct MojoMasterRouter:
+@register("routing_engine")
+struct RoutingEngine:
     """Master routing kernel that combines all signals and makes final decisions."""
     @staticmethod
     fn execute[
@@ -335,21 +335,46 @@ struct MojoMasterRouter:
                 if Int32(d) == best_domain:
                     max_prob = prob
 
-                    # ===== CONFIDENCE-BASED FALLBACK =====
-            if max_prob < 0.4:  # Slightly higher threshold for better decisions
-                # Multi-factor fallback logic
-                if volatility > 0.04 and emb_var > 3.0:
-                    best_domain = Int32(4)  # Derivatives - very high vol + variance
-                elif volatility < 0.003 and emb_var < 0.1:
-                    best_domain = Int32(1)  # Fixed Income - very low vol + variance
-                elif volatility > 0.02 and volatility < 0.035 and emb_var > 0.8:
-                    best_domain = Int32(0)  # Equities - mid-high vol + variance
-                elif abs(emb_mean) > 1.5 and volatility < 0.015:
-                    best_domain = Int32(3)  # FX - strong trend + low-mid vol
-                elif volatility > 0.012 and volatility < 0.025 and emb_abs_mean > 1.0:
-                    best_domain = Int32(2)  # Commodities - seasonal patterns
+                    # ===== ENHANCED CONFIDENCE-BASED ROUTING =====
+            if max_prob < 0.45:  # Higher threshold for more confident decisions
+                # Advanced multi-factor classification with refined thresholds
+                var vol_score = volatility * 1000  # Scale for easier comparison
+                var var_score = emb_var
+                var mean_score = abs(emb_mean)
+                var abs_mean_score = emb_abs_mean
+                
+                # Derivatives: High volatility + high variance
+                if vol_score > 35 and var_score > 2.5:
+                    best_domain = Int32(4)
+                # Fixed Income: Very low volatility + low variance + low mean
+                elif vol_score < 4 and var_score < 0.15 and mean_score < 0.3:
+                    best_domain = Int32(1)
+                # Equities: Medium-high volatility + medium variance
+                elif vol_score > 15 and vol_score < 40 and var_score > 0.4 and var_score < 3.0:
+                    best_domain = Int32(0)
+                # FX: Strong trend (high mean) + medium volatility
+                elif mean_score > 1.2 and vol_score < 20 and vol_score > 5:
+                    best_domain = Int32(3)
+                # Commodities: Seasonal patterns (high abs_mean) + medium volatility
+                elif abs_mean_score > 0.8 and vol_score > 10 and vol_score < 30:
+                    best_domain = Int32(2)
+                # Credit: Low volatility + low variance (but not as extreme as Fixed Income)
+                elif vol_score < 12 and var_score < 0.6 and mean_score < 0.8:
+                    best_domain = Int32(5)
                 else:
-                    best_domain = Int32(5)  # Credit - default for unclear cases
+                    # Hierarchical fallback based on primary signal
+                    if vol_score > 30:
+                        best_domain = Int32(4)  # High vol -> Derivatives
+                    elif vol_score < 5:
+                        best_domain = Int32(1)  # Very low vol -> Fixed Income
+                    elif var_score > 1.5:
+                        best_domain = Int32(0)  # High variance -> Equities
+                    elif mean_score > 1.0:
+                        best_domain = Int32(3)  # Strong trend -> FX
+                    elif abs_mean_score > 0.5:
+                        best_domain = Int32(2)  # Seasonal -> Commodities
+                    else:
+                        best_domain = Int32(5)  # Default -> Credit
 
             return SIMD[DType.int32, simd_width](best_domain)
 
@@ -360,8 +385,8 @@ struct MojoMasterRouter:
         ](domain_assignments, ctx)
 
 
-@register("mojo_expert_computation")
-struct MojoExpertComputation:
+@register("expert_processor")
+struct ExpertProcessor:
     """Expert network computation with domain-specific processing."""
     @staticmethod
     fn execute[
@@ -441,9 +466,9 @@ struct MojoExpertComputation:
         ](expert_outputs, ctx)
 
 
-@register("mojo_routing_loss")
-struct MojoRoutingLoss:
-    """Mojo-powered loss computation for better training integration."""
+@register("routing_loss")
+struct RoutingLoss:
+    """Loss computation for better training integration."""
     @staticmethod
     fn execute[
         target: StaticString,
@@ -517,9 +542,9 @@ struct MojoRoutingLoss:
         ](loss_output, ctx)
 
 
-@register("mojo_gradient_computation")
-struct MojoGradientComputation:
-    """Advanced gradient computation with domain-aware adjustments."""
+@register("gradient_engine")
+struct GradientEngine:
+    """Gradient computation with domain-aware adjustments."""
     @staticmethod
     fn execute[
         target: StaticString,
