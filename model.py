@@ -21,12 +21,16 @@ class FinanceMoEModel(nn.Module):
         is_trained (bool): Flag indicating if the model has been trained.
     """
 
-    def __init__(self, hidden_size=32, num_domains=6):
+    DOMAIN_NAMES = [
+        "Equities", "Fixed Income", "Commodities", "Derivatives"
+    ]
+
+    def __init__(self, hidden_size=32, num_domains=4):
         """Initializes the FinanceMoEModel.
 
         Args:
             hidden_size (int): The dimensionality of the hidden layers.
-            num_domains (int): The number of expert networks.
+            num_domains (int): The number of expert networks (4 domains).
         """
         super().__init__()
         self.hidden_size = hidden_size
@@ -84,11 +88,6 @@ class FinanceMoEModel(nn.Module):
         self.expert_bias = nn.Parameter(
             torch.zeros(num_domains, hidden_size)
         )
-
-        self.domain_names = [
-            "Equities", "Fixed Income", "Commodities",
-            "FX", "Derivatives", "Credit"
-        ]
 
         self.is_trained = False
         self.cuda()
@@ -297,7 +296,7 @@ class FinanceMoEModel(nn.Module):
         return expert_outputs, {
             'domain_assignments': domain_assignments,
             'routing_probs': routing_probs,
-            'domain_names': self.domain_names,
+            'domain_names': self.DOMAIN_NAMES,
             'routing_logits': routing_logits if self.training else None,
             'extracted_features': extracted_features
         }
@@ -345,8 +344,7 @@ class FinanceMoEModel(nn.Module):
         )
 
         self.train()
-        asset_types = ['equities', 'fixed_income', 'commodities', 'fx', 'derivatives', 'credit']
-        best_accuracy = 0.0
+        asset_types = ['equities', 'fixed_income', 'commodities', 'derivatives']
 
         print("Training with Mojo-centric architecture...")
 
@@ -360,10 +358,10 @@ class FinanceMoEModel(nn.Module):
             # Curriculum learning: start with easier distinctions
             if epoch < 50:
                 # Early training: focus on clear distinctions
-                asset_subset = ['fixed_income', 'derivatives', 'equities', 'fx']
+                asset_subset = ['fixed_income', 'derivatives', 'equities', 'commodities']
                 passes_per_epoch = 3
             elif epoch < 120:
-                # Mid training: add commodities and credit
+                # Mid training: all assets
                 asset_subset = asset_types
                 passes_per_epoch = 2
             else:
@@ -400,8 +398,7 @@ class FinanceMoEModel(nn.Module):
                                 volatility = volatility * (1.5 + torch.randn_like(volatility) * 0.3)
 
                         expected_domain = {
-                            'equities': 0, 'fixed_income': 1, 'commodities': 2,
-                            'fx': 3, 'derivatives': 4, 'credit': 5
+                            'equities': 0, 'fixed_income': 1, 'commodities': 2, 'derivatives': 3
                         }[asset_type]
 
                         targets = torch.full(
@@ -493,7 +490,6 @@ class FinanceMoEModel(nn.Module):
 
                         domain_assignments = routing_info['domain_assignments']
                         accuracy = (domain_assignments == targets).float().mean().item()
-                        best_accuracy = max(best_accuracy, accuracy)
                         total_accuracy += accuracy
                         num_batches += 1
 
@@ -506,14 +502,10 @@ class FinanceMoEModel(nn.Module):
 
             if epoch % 8 == 0 or epoch < 20:
                 current_lr = scheduler.get_last_lr()[0]
-                print(f"Epoch {epoch:3d}: Acc={avg_accuracy:.4f} (Best: {best_accuracy:.4f}), "
+                print(f"Epoch {epoch:3d}: Acc={avg_accuracy:.4f}, "
                       f"Loss={avg_loss:.4f}, R_Loss={avg_routing_loss:.4f}, "
                       f"E_Loss={avg_expert_loss:.4f}, LR={current_lr:.6f}")
 
-        self.is_trained = True
-        print(f"\n🎯 Training completed with best accuracy: {best_accuracy:.4f} ({best_accuracy*100:.2f}%)")
-        
-        # Final model state
         self.is_trained = True
 
 
@@ -732,8 +724,7 @@ def analyze_routing_quality(model, asset_types, num_tests=5, seq_len=25):
             probs = routing_info['routing_probs'][0].cpu().numpy()
 
             expected_domain = {
-                'equities': 0, 'fixed_income': 1, 'commodities': 2,
-                'fx': 3, 'derivatives': 4, 'credit': 5
+                'equities': 0, 'fixed_income': 1, 'commodities': 2, 'derivatives': 3
             }[asset_type]
 
             correct_assignments = (assignments == expected_domain).sum()
@@ -769,7 +760,7 @@ if __name__ == "__main__":
     model.eval()
 
     print("Analyzing routing quality...")
-    asset_types = ['equities', 'fixed_income', 'commodities', 'fx', 'derivatives', 'credit']
+    asset_types = ['equities', 'fixed_income', 'commodities', 'derivatives']
     accuracy_results, confidence_results, detailed_results = analyze_routing_quality(
         model, asset_types, num_tests=5, seq_len=30
     )
